@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app
+    working_dir: /app
+    command: ["go", "run", "cmd/server/main.go"]
+    depends_on:
+      - db
+      - redis
+
+  frontend:
+    build:
+      context: ./frontend
+    env_file:
+      - ./frontend/.env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+    working_dir: /app
+    command: ["npm", "run", "start:web"] # or just "npm start" if using Expo CLI
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: dahaa
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
