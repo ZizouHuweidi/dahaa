@@ -1,43 +1,101 @@
 import { Tabs } from 'expo-router';
-import React from 'react';
-import { Platform } from 'react-native';
-
-import { HapticTab } from '@/components/HapticTab';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import TabBarBackground from '@/components/ui/TabBarBackground';
-import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { MaterialIcons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useColorScheme, StyleSheet } from 'react-native';
+import { BlurView } from 'expo-blur';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
-        tabBarButton: HapticTab,
-        tabBarBackground: TabBarBackground,
-        tabBarStyle: Platform.select({
-          ios: {
-            // Use a transparent background on iOS to show the blur effect
-            position: 'absolute',
-          },
-          default: {},
-        }),
-      }}>
+        tabBarStyle: {
+          position: 'absolute',
+          borderTopWidth: 0,
+          backgroundColor: 'transparent',
+          elevation: 0,
+        },
+        tabBarBackground: () => (
+          <BlurView 
+            tint={isDark ? 'dark' : 'light'} 
+            intensity={80}
+            style={StyleSheet.absoluteFill}
+          />
+        ),
+        tabBarInactiveTintColor: isDark ? '#9CA3AF' : '#6B7280',
+        tabBarActiveTintColor: isDark ? '#818CF8' : '#6366F1',
+        tabBarLabelStyle: {
+          fontFamily: 'Inter-Medium',
+          fontSize: 12,
+          marginBottom: 4,
+        },
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          tabBarIcon: ({ focused, color, size }) => (
+            <MaterialIcons 
+              name="home" 
+              size={size} 
+              color={focused ? (isDark ? '#818CF8' : '#6366F1') : (isDark ? '#9CA3AF' : '#6B7280')} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="games"
+        options={{
+          title: 'Games',
+          tabBarIcon: ({ focused, color, size }) => (
+            <MaterialCommunityIcons 
+              name="gamepad-variant" 
+              size={size} 
+              color={focused ? (isDark ? '#818CF8' : '#6366F1') : (isDark ? '#9CA3AF' : '#6B7280')} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="leaderboard"
+        options={{
+          title: 'Leaderboard',
+          tabBarIcon: ({ focused, color, size }) => (
+            <MaterialIcons 
+              name="leaderboard" 
+              size={size} 
+              color={focused ? (isDark ? '#818CF8' : '#6366F1') : (isDark ? '#9CA3AF' : '#6B7280')} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ focused, color, size }) => (
+            <FontAwesome5 
+              name="user" 
+              size={size - 2} 
+              color={focused ? (isDark ? '#818CF8' : '#6366F1') : (isDark ? '#9CA3AF' : '#6B7280')} 
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
           title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          tabBarIcon: ({ focused, color, size }) => (
+            <MaterialIcons 
+              name="explore" 
+              size={size} 
+              color={focused ? (isDark ? '#818CF8' : '#6366F1') : (isDark ? '#9CA3AF' : '#6B7280')} 
+            />
+          ),
         }}
       />
     </Tabs>

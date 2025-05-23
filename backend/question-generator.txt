@@ -1,0 +1,19 @@
+I need to create {number} multiple-choice questions about {category} at {difficulty} difficulty level. 
+
+For each question, provide:
+1. The question text
+2. 4 possible answers (labeled A, B, C, D)
+3. The correct answer (A, B, C, or D)
+4. A brief explanation of the correct answer
+
+Format the response as a JSON array of objects with this structure:
+[
+  {
+    "question": "Question text?",
+    "choices": ["Option A", "Option B", "Option C", "Option D"],
+    "correct_answer": "A",
+    "explanation": "Brief explanation of the correct answer"
+  }
+]
+
+Only include the JSON array in your response, with no additional text or markdown formatting.

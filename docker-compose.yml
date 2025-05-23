@@ -4,45 +4,87 @@ services:
   backend:
     build:
       context: ./backend
+      target: development
     env_file:
       - ./backend/.env
     ports:
       - "8080:8080"
     volumes:
       - ./backend:/app
+      - go-mod-cache:/go/pkg/mod
     working_dir: /app
-    command: ["go", "run", "cmd/server/main.go"]
+    command: [ "go", "run", "cmd/server/main.go" ]
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - GO_ENV=development
+      - DB_HOST=db
+      - REDIS_HOST=redis
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   frontend:
     build:
       context: ./frontend
+      target: development
     env_file:
       - ./frontend/.env
     ports:
       - "3000:3000"
+      - "19000:19000" # Expo dev server
+      - "19001:19001" # Expo dev tools
+      - "19002:19002" # Expo web
     volumes:
       - ./frontend:/app
+      - node-modules:/app/node_modules
     working_dir: /app
-    command: ["npm", "run", "start:web"] # or just "npm start" if using Expo CLI
+    command: [ "npm", "run", "start:web" ]
+    environment:
+      - NODE_ENV=development
+      - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   db:
     image: postgres:16
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: dahaa
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-dahaa}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:
+  redis-data:
+  go-mod-cache:
+  node-modules:
