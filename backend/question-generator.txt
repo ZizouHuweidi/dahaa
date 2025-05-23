@@ -1,19 +1,23 @@
-I need to create {number} multiple-choice questions about {category} at {difficulty} difficulty level. 
-
+Generate {num_questions} questions about {category}.
 For each question, provide:
-1. The question text
-2. 4 possible answers (labeled A, B, C, D)
-3. The correct answer (A, B, C, or D)
-4. A brief explanation of the correct answer
+1. A clear, concise question text
+2. A single correct answer (factually accurate)
+3. {num_fillers} incorrect but plausible filler answers
 
-Format the response as a JSON array of objects with this structure:
+Important guidelines:
+- Questions should be factually accurate and verifiable
+- Avoid opinion-based questions
+- Ensure answers are not too similar to each other
+- Keep questions and answers concise
+- Format filler_answers as a JSON array of strings
+
+Format the response as a JSON array of objects with this exact structure:
 [
   {
-    "question": "Question text?",
-    "choices": ["Option A", "Option B", "Option C", "Option D"],
-    "correct_answer": "A",
-    "explanation": "Brief explanation of the correct answer"
+    "text": "What is the capital of France?",
+    "answer": "Paris",
+    "filler_answers": ["London", "Berlin", "Madrid"]
   }
 ]
 
-Only include the JSON array in your response, with no additional text or markdown formatting.
+ONLY return the JSON array, no other text or markdown formatting.

@@ -1,4 +1,4 @@
-.PHONY: up down logs backend frontend restart clean test-backend test-frontend install-deps
+.PHONY: up down logs backend frontend restart clean test-backend test-frontend install-deps format-frontend lint-frontend
 
 # Docker commands
 up:
@@ -19,7 +19,7 @@ clean:
 
 # Development commands
 backend:
-	cd backend && go run cmd/server/main.go
+	cd backend && go run cmd/api/main.go
 
 frontend:
 	cd frontend && npm start
@@ -54,24 +54,39 @@ format-backend:
 	cd backend && go fmt ./...
 
 format-frontend:
-	cd frontend && npm run format
+	cd frontend && npx prettier --write .
+
+# Code generation
+generate:
+	cd backend && go generate ./...
 
 # Help command
 help:
 	@echo "Available commands:"
-	@echo "  make up              - Start all services"
+	@echo "  make up              - Start all services (backend, db, redis)"
 	@echo "  make down            - Stop all services"
 	@echo "  make logs            - View logs from all services"
 	@echo "  make restart         - Restart all services"
 	@echo "  make clean           - Remove all containers and volumes"
-	@echo "  make backend         - Start backend service"
-	@echo "  make frontend        - Start frontend service"
+	@echo ""
+	@echo "Development:"
+	@echo "  make backend         - Start backend service (without Docker)"
+	@echo "  make frontend        - Start frontend development server"
+	@echo ""
+	@echo "Testing:"
 	@echo "  make test-backend    - Run backend tests"
 	@echo "  make test-frontend   - Run frontend tests"
+	@echo ""
+	@echo "Dependencies:"
 	@echo "  make install-deps    - Install all dependencies"
+	@echo ""
+	@echo "Database:"
 	@echo "  make db-migrate      - Run database migrations"
 	@echo "  make db-rollback     - Rollback database migrations"
+	@echo ""
+	@echo "Code Quality:"
 	@echo "  make lint-backend    - Run backend linter"
 	@echo "  make lint-frontend   - Run frontend linter"
 	@echo "  make format-backend  - Format backend code"
 	@echo "  make format-frontend - Format frontend code"
+	@echo "  make generate        - Generate backend code"

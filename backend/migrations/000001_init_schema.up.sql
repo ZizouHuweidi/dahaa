@@ -16,6 +16,8 @@ CREATE TABLE questions (
     answer TEXT NOT NULL,
     category VARCHAR(50) NOT NULL,
     filler_answers TEXT[] NOT NULL DEFAULT '{}', -- Array of pre-defined filler answers
+    image_path TEXT, -- Optional path to the question image file
+    image_alt TEXT, -- Optional alt text for accessibility
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT category_length CHECK (char_length(category) >= 3)

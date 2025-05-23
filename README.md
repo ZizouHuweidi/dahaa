@@ -48,23 +48,43 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
-3. Start the development environment:
+3. Install dependencies:
+```bash
+make install-deps
+```
+
+4. Start the backend services (database, Redis, and backend server):
 ```bash
 make up
 ```
 
-This will start:
-- PostgreSQL database
-- Redis cache
-- Backend server
-- Frontend development server
+5. In a separate terminal, start the frontend development server:
+```bash
+make frontend
+```
 
-- `make up` - Start all services
+## Development Commands
+
+### Backend (Docker)
+- `make up` - Start all services (PostgreSQL, Redis, backend)
 - `make down` - Stop all services
-- `make backend` - Start only the backend service
-- `make frontend` - Start only the frontend service
-- `make logs` - View logs from all services
+- `make backend` - Start backend service without Docker
+- `make test-backend` - Run backend tests
+- `make db-migrate` - Run database migrations
+- `make db-rollback` - Rollback database migrations
+- `make lint-backend` - Run backend linter
+- `make format-backend` - Format backend code
+- `make generate` - Generate backend code
+
+### Frontend (Local)
+- `make frontend` - Start frontend development server
+- `make test-frontend` - Run frontend tests
+- `make lint-frontend` - Run frontend linter
+- `make format-frontend` - Format frontend code
+
+### Maintenance
 - `make clean` - Remove all containers and volumes
+- `make install-deps` - Install all dependencies
 
 ## Contributing
 

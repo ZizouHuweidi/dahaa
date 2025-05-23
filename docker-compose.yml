@@ -1,10 +1,15 @@
 version: "3.9"
 
+# Define networks for better isolation
+networks:
+  backend:
+    driver: bridge
+
 services:
   backend:
+    container_name: dahaa-backend
     build:
       context: ./backend
-      target: development
     env_file:
       - ./backend/.env
     ports:
@@ -13,7 +18,7 @@ services:
       - ./backend:/app
       - go-mod-cache:/go/pkg/mod
     working_dir: /app
-    command: [ "go", "run", "cmd/server/main.go" ]
+    command: ["go", "run", "cmd/api/main.go"]
     depends_on:
       db:
         condition: service_healthy
@@ -22,69 +27,111 @@ services:
     environment:
       - GO_ENV=development
       - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER:-postgres}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - DB_NAME=${POSTGRES_DB:-dahaa}
       - REDIS_HOST=redis
+      - PORT=8080
+    networks:
+      - backend
+    restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-
-  frontend:
-    build:
-      context: ./frontend
-      target: development
-    env_file:
-      - ./frontend/.env
-    ports:
-      - "3000:3000"
-      - "19000:19000" # Expo dev server
-      - "19001:19001" # Expo dev tools
-      - "19002:19002" # Expo web
-    volumes:
-      - ./frontend:/app
-      - node-modules:/app/node_modules
-    working_dir: /app
-    command: [ "npm", "run", "start:web" ]
-    environment:
-      - NODE_ENV=development
-      - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:3000" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          memory: 512M
 
   db:
-    image: postgres:16
+    container_name: dahaa-db
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-dahaa}
+      POSTGRES_INITDB_ARGS: --data-checksums
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
+    networks:
+      - backend
+    restart: unless-stopped
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-dahaa}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
 
   redis:
-    image: redis:7
+    container_name: dahaa-redis
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --save 60 1 --loglevel warning
     ports:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    networks:
+      - backend
+    restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 128M
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   pgdata:
+    name: dahaa-pgdata
+    driver: local
   redis-data:
+    name: dahaa-redis-data
+    driver: local
   go-mod-cache:
-  node-modules:
+    name: dahaa-go-mod-cache
+    driver: local
