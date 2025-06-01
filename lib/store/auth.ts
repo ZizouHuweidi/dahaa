@@ -18,17 +18,26 @@ interface AuthState {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   clearError: () => void;
+  getAuthHeaders: () => Record<string, string>;
 }
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8080';
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       token: null,
       user: null,
       isLoading: false,
       error: null,
+
+      getAuthHeaders: () => {
+        const { token } = get();
+        return {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
+      },
 
       register: async (username: string, email: string, password: string, displayName: string) => {
         set({ isLoading: true, error: null });
@@ -78,7 +87,24 @@ export const useAuthStore = create<AuthState>()(
             throw new Error(data.error || 'Failed to login');
           }
 
-          set({ token: data.token, isLoading: false });
+          // Fetch user data after successful login
+          const userResponse = await fetch(`${API_URL}/users/me`, {
+            headers: {
+              Authorization: `Bearer ${data.token}`,
+            },
+          });
+
+          if (!userResponse.ok) {
+            throw new Error('Failed to fetch user data');
+          }
+
+          const userData = await userResponse.json();
+
+          set({ 
+            token: data.token, 
+            user: userData,
+            isLoading: false 
+          });
         } catch (error) {
           set({ error: error instanceof Error ? error.message : 'Failed to login', isLoading: false });
         }

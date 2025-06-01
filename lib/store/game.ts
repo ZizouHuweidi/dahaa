@@ -1,156 +1,264 @@
 import { create } from 'zustand';
-import { apiClient } from '~/lib/api/client';
 import { useAuthStore } from './auth';
+import { websocketService } from '../services/websocket';
+
+interface Player {
+  id: string;
+  username: string;
+  displayName: string;
+  score: number;
+  isHost: boolean;
+}
 
 interface GameSettings {
+  maxPlayers: number;
   rounds: number;
-  time_limits: {
-    category_selection: number;
-    answer_writing: number;
-    voting: number;
-  };
-  selected_categories: string[];
-  max_players: number;
+  timePerRound: number;
+  categories: string[];
 }
 
-export interface Player {
-  id: string;
-  name: string;
-  score: number;
-  is_connected: boolean;
-  last_seen: string;
-  is_active: boolean;
-}
-
-export interface Game {
+interface Game {
   id: string;
   code: string;
   status: 'waiting' | 'playing' | 'ended';
   players: Player[];
-  rounds: Round[];
-  currentRound?: number;
   settings: GameSettings;
-  created_at: string;
-  updated_at: string;
-  last_activity: string;
-  hostId?: string;
-}
-
-interface Round {
-  number: number;
-  category: string;
-  question: string;
-  question_id: string;
-  status: 'waiting' | 'active' | 'voting' | 'completed';
-  start_time: string;
-  end_time: string;
-  current_turn?: Turn;
-  answer_pool: AnswerPool;
-  timer?: Timer;
-}
-
-interface Turn {
-  player_id: string;
-  start_time: string;
-  end_time: string;
-  status: 'waiting' | 'active' | 'ended';
-  category?: string;
-  timer?: Timer;
-}
-
-interface AnswerPool {
-  correct_answer: string;
-  fake_answers: Answer[];
-  filler_answers: Answer[];
-}
-
-interface Answer {
-  id: string;
-  player_id: string;
-  text: string;
-  votes: string[];
-  created_at: string;
-}
-
-interface Timer {
-  type: 'category_selection' | 'answer_writing' | 'voting';
-  start_time: string;
-  duration: number;
-  end_time: string;
+  currentRound: number;
+  currentCategory: string | null;
+  currentPhase: 'category' | 'answer' | 'vote' | 'end';
+  timeRemaining: number;
 }
 
 interface GameState {
   currentGame: Game | null;
   isLoading: boolean;
   error: string | null;
-  createGame: (playerName: string) => Promise<void>;
-  joinGame: (gameCode: string, playerName: string) => Promise<void>;
+  createGame: (settings: GameSettings) => Promise<void>;
+  joinGame: (code: string) => Promise<void>;
   startGame: () => Promise<void>;
-  leaveGame: () => Promise<void>;
   submitAnswer: (answer: string) => Promise<void>;
+  submitVote: (answerId: string) => Promise<void>;
+  endRound: () => Promise<void>;
+  endGame: () => Promise<void>;
   clearError: () => void;
 }
 
-export const useGameStore = create<GameState>((set) => ({
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8080';
+
+export const useGameStore = create<GameState>()((set, get) => ({
   currentGame: null,
   isLoading: false,
   error: null,
 
-  createGame: async (playerName: string) => {
+  createGame: async (settings: GameSettings) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await apiClient.createGame(playerName);
-      set({ currentGame: response, isLoading: false });
+      const { getAuthHeaders } = useAuthStore.getState();
+      const response = await fetch(`${API_URL}/games`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(settings),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create game');
+      }
+
+      set({ currentGame: data, isLoading: false });
     } catch (error) {
-      set({ error: 'Failed to create game', isLoading: false });
+      set({ error: error instanceof Error ? error.message : 'Failed to create game', isLoading: false });
     }
   },
 
-  joinGame: async (gameCode: string, playerName: string) => {
+  joinGame: async (code: string) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await apiClient.joinGame(gameCode, playerName);
-      set({ currentGame: response, isLoading: false });
+      const { getAuthHeaders } = useAuthStore.getState();
+      const response = await fetch(`${API_URL}/games/${code}/join`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to join game');
+      }
+
+      set({ currentGame: data, isLoading: false });
     } catch (error) {
-      set({ error: 'Failed to join game', isLoading: false });
+      set({ error: error instanceof Error ? error.message : 'Failed to join game', isLoading: false });
     }
   },
 
   startGame: async () => {
     set({ isLoading: true, error: null });
     try {
-      const gameCode = useGameStore.getState().currentGame?.code;
-      if (!gameCode) throw new Error('No active game');
-      const response = await apiClient.startGame(gameCode);
-      set({ currentGame: response, isLoading: false });
-    } catch (error) {
-      set({ error: 'Failed to start game', isLoading: false });
-    }
-  },
+      const { currentGame } = get();
+      if (!currentGame) throw new Error('No active game');
 
-  leaveGame: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const gameCode = useGameStore.getState().currentGame?.code;
-      if (!gameCode) throw new Error('No active game');
-      await apiClient.leaveGame(gameCode);
-      set({ currentGame: null, isLoading: false });
+      const { getAuthHeaders } = useAuthStore.getState();
+      const response = await fetch(`${API_URL}/games/${currentGame.id}/start`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to start game');
+      }
+
+      set({ currentGame: data, isLoading: false });
     } catch (error) {
-      set({ error: 'Failed to leave game', isLoading: false });
+      set({ error: error instanceof Error ? error.message : 'Failed to start game', isLoading: false });
     }
   },
 
   submitAnswer: async (answer: string) => {
     set({ isLoading: true, error: null });
     try {
-      const gameCode = useGameStore.getState().currentGame?.code;
-      if (!gameCode) throw new Error('No active game');
-      const response = await apiClient.submitAnswer(gameCode, answer);
-      set({ currentGame: response, isLoading: false });
+      const { currentGame } = get();
+      if (!currentGame) throw new Error('No active game');
+
+      const { getAuthHeaders } = useAuthStore.getState();
+      const response = await fetch(`${API_URL}/games/${currentGame.id}/answer`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ answer }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to submit answer');
+      }
+
+      set({ currentGame: data, isLoading: false });
     } catch (error) {
-      set({ error: 'Failed to submit answer', isLoading: false });
+      set({ error: error instanceof Error ? error.message : 'Failed to submit answer', isLoading: false });
     }
   },
 
-  clearError: () => set({ error: null }),
-})); 
+  submitVote: async (answerId: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const { currentGame } = get();
+      if (!currentGame) throw new Error('No active game');
+
+      const { getAuthHeaders } = useAuthStore.getState();
+      const response = await fetch(`${API_URL}/games/${currentGame.id}/vote`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ answerId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to submit vote');
+      }
+
+      set({ currentGame: data, isLoading: false });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Failed to submit vote', isLoading: false });
+    }
+  },
+
+  endRound: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const { currentGame } = get();
+      if (!currentGame) throw new Error('No active game');
+
+      const { getAuthHeaders } = useAuthStore.getState();
+      const response = await fetch(`${API_URL}/games/${currentGame.id}/round/end`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to end round');
+      }
+
+      set({ currentGame: data, isLoading: false });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Failed to end round', isLoading: false });
+    }
+  },
+
+  endGame: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const { currentGame } = get();
+      if (!currentGame) throw new Error('No active game');
+
+      const { getAuthHeaders } = useAuthStore.getState();
+      const response = await fetch(`${API_URL}/games/${currentGame.id}/end`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to end game');
+      }
+
+      set({ currentGame: data, isLoading: false });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Failed to end game', isLoading: false });
+    }
+  },
+
+  clearError: () => {
+    set({ error: null });
+  },
+}));
+
+// Subscribe to WebSocket events
+websocketService.subscribe('game_update', (data) => {
+  useGameStore.setState({ currentGame: data });
+});
+
+websocketService.subscribe('player_update', (data) => {
+  const { currentGame } = useGameStore.getState();
+  if (currentGame) {
+    useGameStore.setState({
+      currentGame: {
+        ...currentGame,
+        players: data,
+      },
+    });
+  }
+});
+
+websocketService.subscribe('round_update', (data) => {
+  const { currentGame } = useGameStore.getState();
+  if (currentGame) {
+    useGameStore.setState({
+      currentGame: {
+        ...currentGame,
+        currentRound: data.round,
+        currentCategory: data.category,
+        currentPhase: data.phase,
+      },
+    });
+  }
+});
+
+websocketService.subscribe('timer_update', (data) => {
+  const { currentGame } = useGameStore.getState();
+  if (currentGame) {
+    useGameStore.setState({
+      currentGame: {
+        ...currentGame,
+        timeRemaining: data.timeRemaining,
+      },
+    });
+  }
+}); 
