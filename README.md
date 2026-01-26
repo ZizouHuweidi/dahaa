@@ -1,3 +1,3 @@
-# dahaa-backend
+# dahaa
 
-backend for dahaa game
+quiz game
