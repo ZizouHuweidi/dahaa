@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 -- Create users table
 CREATE TABLE users (
     id VARCHAR(36) PRIMARY KEY,
@@ -30,3 +32,4 @@ CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_game_invites_game_id ON game_invites(game_id);
 CREATE INDEX idx_game_invites_to_user ON game_invites(to_user);
 CREATE INDEX idx_game_invites_status ON game_invites(status); 
+-- +goose StatementEnd

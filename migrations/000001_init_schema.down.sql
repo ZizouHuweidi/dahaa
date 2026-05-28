@@ -1,3 +1,5 @@
+-- +goose Down
+-- +goose StatementBegin
 -- Drop comments
 COMMENT ON TABLE games IS NULL;
 COMMENT ON TABLE questions IS NULL;
@@ -15,3 +17,5 @@ DROP INDEX IF EXISTS idx_questions_category;
 -- Drop tables
 DROP TABLE IF EXISTS games;
 DROP TABLE IF EXISTS questions;
+DROP FUNCTION IF EXISTS update_updated_at_column();
+-- +goose StatementEnd

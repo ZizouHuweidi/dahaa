@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -33,13 +34,18 @@ func NewManager(redis *redis.Client) *Manager {
 
 // StoreGame stores a game in Redis
 func (m *Manager) StoreGame(ctx context.Context, game *domain.Game) error {
-	key := gameKeyPrefix + game.ID
 	data, err := json.Marshal(game)
 	if err != nil {
 		return fmt.Errorf("failed to marshal game: %w", err)
 	}
 
-	return m.redis.Set(ctx, key, data, sessionExpiration).Err()
+	pipe := m.redis.Pipeline()
+	pipe.Set(ctx, gameKeyPrefix+game.ID, data, sessionExpiration)
+	if game.Code != "" {
+		pipe.Set(ctx, gameKeyPrefix+game.Code, data, sessionExpiration)
+	}
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 // GetGame retrieves a game from Redis
@@ -196,7 +202,7 @@ func (m *Manager) CleanupInactiveGames(ctx context.Context) error {
 		if time.Since(game.LastActivity) > 24*time.Hour {
 			if err := m.DeleteGame(ctx, game.ID); err != nil {
 				// Log error but continue with other games
-				fmt.Printf("Failed to delete inactive game %s: %v\n", game.ID, err)
+				slog.Warn("failed to delete inactive game", "error", err, "game_id", game.ID)
 			}
 		}
 	}
@@ -216,7 +222,7 @@ func (m *Manager) StartCleanupJob(ctx context.Context) {
 			select {
 			case <-ticker.C:
 				if err := m.CleanupInactiveGames(ctx); err != nil {
-					fmt.Printf("Failed to cleanup inactive games: %v\n", err)
+					slog.Warn("failed to cleanup inactive games", "error", err)
 				}
 			case <-ctx.Done():
 				ticker.Stop()

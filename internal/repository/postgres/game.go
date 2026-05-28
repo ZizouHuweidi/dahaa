@@ -26,8 +26,8 @@ func NewGameRepository(pool *pgxpool.Pool) *GameRepository {
 // Create creates a new game
 func (r *GameRepository) Create(ctx context.Context, game *domain.Game) error {
 	query := `
-		INSERT INTO games (code, status, players, rounds, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO games (code, status, players, rounds, settings, last_activity, host_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id
 	`
 
@@ -40,6 +40,10 @@ func (r *GameRepository) Create(ctx context.Context, game *domain.Game) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal rounds: %w", err)
 	}
+	settings, err := json.Marshal(game.Settings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
 
 	now := time.Now().UTC()
 	var id string
@@ -48,6 +52,9 @@ func (r *GameRepository) Create(ctx context.Context, game *domain.Game) error {
 		game.Status,
 		players,
 		rounds,
+		settings,
+		game.LastActivity,
+		game.HostID,
 		now,
 		now,
 	).Scan(&id)
@@ -63,21 +70,24 @@ func (r *GameRepository) Create(ctx context.Context, game *domain.Game) error {
 // GetByCode retrieves a game by its code
 func (r *GameRepository) GetByCode(ctx context.Context, code string) (*domain.Game, error) {
 	query := `
-		SELECT id, code, status, players, rounds, created_at, updated_at
+		SELECT id, code, status, players, rounds, settings, created_at, updated_at, last_activity, host_id
 		FROM games
 		WHERE code = $1
 	`
 
 	var game domain.Game
-	var players, rounds []byte
+	var players, rounds, settings []byte
 	err := r.pool.QueryRow(ctx, query, code).Scan(
 		&game.ID,
 		&game.Code,
 		&game.Status,
 		&players,
 		&rounds,
+		&settings,
 		&game.CreatedAt,
 		&game.UpdatedAt,
+		&game.LastActivity,
+		&game.HostID,
 	)
 
 	if err != nil {
@@ -94,6 +104,14 @@ func (r *GameRepository) GetByCode(ctx context.Context, code string) (*domain.Ga
 	if err := json.Unmarshal(rounds, &game.Rounds); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal rounds: %w", err)
 	}
+	if len(settings) > 0 {
+		if err := json.Unmarshal(settings, &game.Settings); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal settings: %w", err)
+		}
+	}
+	if game.Settings == nil || game.Settings.MaxPlayers == 0 {
+		game.Settings = domain.DefaultGameSettings()
+	}
 
 	return &game, nil
 }
@@ -102,8 +120,8 @@ func (r *GameRepository) GetByCode(ctx context.Context, code string) (*domain.Ga
 func (r *GameRepository) Update(ctx context.Context, game *domain.Game) error {
 	query := `
 		UPDATE games
-		SET status = $1, players = $2, rounds = $3, updated_at = $4
-		WHERE code = $5
+		SET status = $1, players = $2, rounds = $3, settings = $4, last_activity = $5, host_id = $6, updated_at = $7
+		WHERE code = $8
 	`
 
 	players, err := json.Marshal(game.Players)
@@ -115,12 +133,19 @@ func (r *GameRepository) Update(ctx context.Context, game *domain.Game) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal rounds: %w", err)
 	}
+	settings, err := json.Marshal(game.Settings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
 
 	now := time.Now().UTC()
 	_, err = r.pool.Exec(ctx, query,
 		game.Status,
 		players,
 		rounds,
+		settings,
+		game.LastActivity,
+		game.HostID,
 		now,
 		game.Code,
 	)
@@ -150,9 +175,9 @@ func (r *GameRepository) Delete(ctx context.Context, code string) error {
 // GetByID retrieves a game by its ID
 func (r *GameRepository) GetByID(ctx context.Context, id string) (*domain.Game, error) {
 	var game domain.Game
-	var players, rounds []byte
+	var players, rounds, settings []byte
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, code, status, players, rounds, created_at, updated_at, last_activity
+		SELECT id, code, status, players, rounds, settings, created_at, updated_at, last_activity, host_id
 		FROM games
 		WHERE id = $1
 	`, id).Scan(
@@ -161,9 +186,11 @@ func (r *GameRepository) GetByID(ctx context.Context, id string) (*domain.Game, 
 		&game.Status,
 		&players,
 		&rounds,
+		&settings,
 		&game.CreatedAt,
 		&game.UpdatedAt,
 		&game.LastActivity,
+		&game.HostID,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -178,6 +205,14 @@ func (r *GameRepository) GetByID(ctx context.Context, id string) (*domain.Game, 
 
 	if err := json.Unmarshal(rounds, &game.Rounds); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal rounds: %w", err)
+	}
+	if len(settings) > 0 {
+		if err := json.Unmarshal(settings, &game.Settings); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal settings: %w", err)
+		}
+	}
+	if game.Settings == nil || game.Settings.MaxPlayers == 0 {
+		game.Settings = domain.DefaultGameSettings()
 	}
 
 	return &game, nil

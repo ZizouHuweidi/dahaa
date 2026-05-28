@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"slices"
 	"strings"
@@ -109,6 +110,7 @@ func (s *GameService) CreateGame(ctx context.Context, code string, player domain
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 		LastActivity: time.Now(),
+		HostID:       player.ID,
 	}
 
 	// Save to database
@@ -173,20 +175,23 @@ func (s *GameService) JoinGame(ctx context.Context, code string, player domain.P
 	return nil
 }
 
-// GetGame retrieves a game by its code
-func (s *GameService) GetGame(ctx context.Context, gameID string) (*domain.Game, error) {
+// GetGame retrieves a game by public code or internal ID.
+func (s *GameService) GetGame(ctx context.Context, gameRef string) (*domain.Game, error) {
 	// Try to get game from Redis first
-	game, err := s.sessionMgr.GetGame(ctx, gameID)
+	game, err := s.sessionMgr.GetGame(ctx, gameRef)
 	if err != nil {
-		// If not in Redis, try database
-		game, err = s.gameRepo.GetByID(ctx, gameID)
+		// Public APIs use the short join code, so prefer code lookup for database fallback.
+		game, err = s.gameRepo.GetByCode(ctx, gameRef)
+		if err != nil {
+			game, err = s.gameRepo.GetByID(ctx, gameRef)
+		}
 		if err != nil {
 			return nil, err
 		}
 		// Store in Redis for future access
 		if err := s.sessionMgr.StoreGame(ctx, game); err != nil {
 			// Log error but continue
-			fmt.Printf("Failed to store game in Redis: %v\n", err)
+			slog.Warn("failed to store game in redis", "error", err, "game_ref", gameRef)
 		}
 	}
 	return game, nil
@@ -202,7 +207,7 @@ func (s *GameService) UpdateGame(ctx context.Context, game *domain.Game) error {
 	// Update in Redis
 	if err := s.sessionMgr.StoreGame(ctx, game); err != nil {
 		// Log error but continue
-		fmt.Printf("Failed to update game in Redis: %v\n", err)
+		slog.Warn("failed to update game in redis", "error", err, "game_id", game.ID, "game_code", game.Code)
 	}
 
 	// Notify all clients about game update
@@ -275,6 +280,7 @@ func (s *GameService) StartGame(ctx context.Context, code string) error {
 			CorrectAnswer: "",
 			FakeAnswers:   make([]domain.Answer, 0),
 			FillerAnswers: make([]domain.Answer, 0),
+			Options:       make([]domain.Answer, 0),
 		},
 	}
 
@@ -360,6 +366,9 @@ func (s *GameService) SelectCategory(ctx context.Context, gameID string, categor
 	currentRound.Question = question.Text
 	currentRound.QuestionID = question.ID
 	currentRound.AnswerPool.CorrectAnswer = question.Answer
+	currentRound.AnswerPool.FakeAnswers = make([]domain.Answer, 0)
+	currentRound.AnswerPool.FillerAnswers = make([]domain.Answer, 0)
+	currentRound.AnswerPool.Options = make([]domain.Answer, 0)
 
 	// Start answer writing timer using game settings
 	currentRound.Timer = &domain.Timer{
@@ -401,39 +410,38 @@ func (s *GameService) SubmitAnswer(ctx context.Context, gameID string, playerID 
 		ID:        generateID(),
 		PlayerID:  playerID,
 		Text:      answer,
+		Kind:      domain.AnswerKindFake,
 		Votes:     make([]string, 0),
 		CreatedAt: time.Now(),
 	}
 
 	currentRound.AnswerPool.FakeAnswers = append(currentRound.AnswerPool.FakeAnswers, newAnswer)
 
-	// Check if we need to generate filler answers
-	if err := s.ensureAnswerPool(ctx, game); err != nil {
-		return err
-	}
-
 	// If all players have submitted answers, start voting
 	if len(currentRound.AnswerPool.FakeAnswers) == len(game.Players)-1 {
+		if err := s.buildVotingOptions(ctx, game); err != nil {
+			return err
+		}
 		currentRound.Status = domain.RoundStatusVoting
 		currentRound.Timer = &domain.Timer{
 			Type:      domain.TimerTypeVoting,
 			StartTime: time.Now(),
-			Duration:  30, // 30 seconds for voting
-			EndTime:   time.Now().Add(30 * time.Second),
+			Duration:  game.Settings.TimeLimits.Voting,
+			EndTime:   time.Now().Add(time.Duration(game.Settings.TimeLimits.Voting) * time.Second),
 		}
 	}
 
 	return s.UpdateGame(ctx, game)
 }
 
-// ensureAnswerPool ensures we have n+1 answers in the pool
-func (s *GameService) ensureAnswerPool(ctx context.Context, game *domain.Game) error {
+func (s *GameService) buildVotingOptions(ctx context.Context, game *domain.Game) error {
 	currentRound := &game.Rounds[len(game.Rounds)-1]
-	requiredAnswers := len(game.Players)
-
-	// If we have enough answers, no need for fillers
-	if len(currentRound.AnswerPool.FakeAnswers) >= requiredAnswers {
-		return nil
+	currentRound.AnswerPool.FillerAnswers = make([]domain.Answer, 0)
+	currentRound.AnswerPool.Options = make([]domain.Answer, 0)
+	targetOptions := max(len(game.Players), 4)
+	neededFillers := targetOptions - len(currentRound.AnswerPool.FakeAnswers) - 1
+	if neededFillers < 0 {
+		neededFillers = 0
 	}
 
 	// Get the current question to access its filler answers
@@ -449,8 +457,7 @@ func (s *GameService) ensureAnswerPool(ctx context.Context, game *domain.Game) e
 		fillerAnswers[i], fillerAnswers[j] = fillerAnswers[j], fillerAnswers[i]
 	})
 
-	// Add filler answers until we have enough
-	neededFillers := requiredAnswers - len(currentRound.AnswerPool.FakeAnswers)
+	// Add filler answers until we have enough voting options.
 	for i := 0; i < neededFillers && i < len(fillerAnswers); i++ {
 		fillerAnswer := fillerAnswers[i]
 
@@ -475,6 +482,7 @@ func (s *GameService) ensureAnswerPool(ctx context.Context, game *domain.Game) e
 			ID:        generateID(),
 			PlayerID:  "system",
 			Text:      fillerAnswer,
+			Kind:      domain.AnswerKindFiller,
 			Votes:     make([]string, 0),
 			CreatedAt: time.Now(),
 		}
@@ -482,10 +490,10 @@ func (s *GameService) ensureAnswerPool(ctx context.Context, game *domain.Game) e
 		currentRound.AnswerPool.FillerAnswers = append(currentRound.AnswerPool.FillerAnswers, newAnswer)
 	}
 
-	// If we still need more fillers, generate them using templates
+	// If we still need more fillers, generate them using templates.
 	if len(currentRound.AnswerPool.FillerAnswers) < neededFillers {
 		remaining := neededFillers - len(currentRound.AnswerPool.FillerAnswers)
-		for i := 0; i < remaining; i++ {
+		for i, attempts := 0, 0; i < remaining && attempts < remaining*10; attempts++ {
 			fillerAnswer, err := s.generateFillerAnswer(currentRound.Question, currentRound.Category)
 			if err != nil {
 				return err
@@ -503,9 +511,7 @@ func (s *GameService) ensureAnswerPool(ctx context.Context, game *domain.Game) e
 				isSimilar = true
 			}
 
-			// If similar, try again
 			if isSimilar {
-				i--
 				continue
 			}
 
@@ -513,13 +519,31 @@ func (s *GameService) ensureAnswerPool(ctx context.Context, game *domain.Game) e
 				ID:        generateID(),
 				PlayerID:  "system",
 				Text:      fillerAnswer,
+				Kind:      domain.AnswerKindFiller,
 				Votes:     make([]string, 0),
 				CreatedAt: time.Now(),
 			}
 
 			currentRound.AnswerPool.FillerAnswers = append(currentRound.AnswerPool.FillerAnswers, newAnswer)
+			i++
 		}
 	}
+
+	options := make([]domain.Answer, 0, 1+len(currentRound.AnswerPool.FakeAnswers)+len(currentRound.AnswerPool.FillerAnswers))
+	options = append(options, domain.Answer{
+		ID:        generateID(),
+		PlayerID:  "system",
+		Text:      currentRound.AnswerPool.CorrectAnswer,
+		Kind:      domain.AnswerKindCorrect,
+		Votes:     make([]string, 0),
+		CreatedAt: time.Now(),
+	})
+	options = append(options, currentRound.AnswerPool.FakeAnswers...)
+	options = append(options, currentRound.AnswerPool.FillerAnswers...)
+	rand.Shuffle(len(options), func(i, j int) {
+		options[i], options[j] = options[j], options[i]
+	})
+	currentRound.AnswerPool.Options = options
 
 	return nil
 }
@@ -607,7 +631,7 @@ func (s *GameService) SubmitVote(ctx context.Context, gameID string, playerID st
 	}
 
 	// Check if player has already voted
-	for _, answer := range currentRound.AnswerPool.FakeAnswers {
+	for _, answer := range currentRound.AnswerPool.Options {
 		if slices.Contains(answer.Votes, playerID) {
 			return domain.ErrVoteSubmitted
 		}
@@ -615,9 +639,12 @@ func (s *GameService) SubmitVote(ctx context.Context, gameID string, playerID st
 
 	// Find the answer and add the vote
 	found := false
-	for i := range currentRound.AnswerPool.FakeAnswers {
-		if currentRound.AnswerPool.FakeAnswers[i].ID == answerID {
-			currentRound.AnswerPool.FakeAnswers[i].Votes = append(currentRound.AnswerPool.FakeAnswers[i].Votes, playerID)
+	for i := range currentRound.AnswerPool.Options {
+		if currentRound.AnswerPool.Options[i].ID == answerID {
+			if currentRound.AnswerPool.Options[i].PlayerID == playerID {
+				return errors.New("cannot vote for your own answer")
+			}
+			currentRound.AnswerPool.Options[i].Votes = append(currentRound.AnswerPool.Options[i].Votes, playerID)
 			found = true
 			break
 		}
@@ -629,49 +656,12 @@ func (s *GameService) SubmitVote(ctx context.Context, gameID string, playerID st
 
 	// Check if all players have voted
 	totalVotes := 0
-	for _, answer := range currentRound.AnswerPool.FakeAnswers {
+	for _, answer := range currentRound.AnswerPool.Options {
 		totalVotes += len(answer.Votes)
 	}
 
 	if totalVotes == len(game.Players) {
-		// Group answers by content to find duplicates
-		answerGroups := make(map[string][]domain.Answer)
-		for _, answer := range currentRound.AnswerPool.FakeAnswers {
-			answerGroups[answer.Text] = append(answerGroups[answer.Text], answer)
-		}
-
-		// Calculate scores
-		for _, group := range answerGroups {
-			if len(group) > 1 {
-				// This is a group of duplicate answers
-				// Each player in the group gets points for each vote their shared answer received
-				totalVotesForGroup := 0
-				for _, answer := range group {
-					totalVotesForGroup += len(answer.Votes)
-				}
-
-				// Each player in the group gets points equal to the total votes
-				pointsPerPlayer := totalVotesForGroup
-				for _, answer := range group {
-					for i := range game.Players {
-						if game.Players[i].ID == answer.PlayerID {
-							game.Players[i].Score += pointsPerPlayer
-							break
-						}
-					}
-				}
-			} else {
-				// Single answer - normal scoring
-				answer := group[0]
-				points := len(answer.Votes)
-				for i := range game.Players {
-					if game.Players[i].ID == answer.PlayerID {
-						game.Players[i].Score += points
-						break
-					}
-				}
-			}
-		}
+		s.calculateRoundScores(game, currentRound)
 
 		currentRound.Status = domain.RoundStatusCompleted
 		currentRound.EndTime = time.Now()
@@ -687,6 +677,30 @@ func (s *GameService) SubmitVote(ctx context.Context, gameID string, playerID st
 	return s.UpdateGame(ctx, game)
 }
 
+func (s *GameService) calculateRoundScores(game *domain.Game, round *domain.Round) {
+	for _, option := range round.AnswerPool.Options {
+		for _, voterID := range option.Votes {
+			switch option.Kind {
+			case domain.AnswerKindCorrect:
+				addPlayerScore(game, voterID, 2)
+			case domain.AnswerKindFake:
+				if option.PlayerID != voterID {
+					addPlayerScore(game, option.PlayerID, 1)
+				}
+			}
+		}
+	}
+}
+
+func addPlayerScore(game *domain.Game, playerID string, points int) {
+	for i := range game.Players {
+		if game.Players[i].ID == playerID {
+			game.Players[i].Score += points
+			return
+		}
+	}
+}
+
 // EndRound ends the current round and starts a new one
 func (s *GameService) EndRound(ctx context.Context, code string) error {
 	game, err := s.GetGame(ctx, code)
@@ -699,13 +713,27 @@ func (s *GameService) EndRound(ctx context.Context, code string) error {
 	}
 
 	currentRound := &game.Rounds[len(game.Rounds)-1]
-	if currentRound.Status == domain.RoundStatusCompleted {
-		return errors.New("round already completed")
+	if currentRound.Status != domain.RoundStatusCompleted {
+		currentRound.Status = domain.RoundStatusCompleted
+		currentRound.EndTime = time.Now()
+	} else if len(game.Rounds) >= game.Settings.Rounds {
+		game.Status = domain.GameStatusEnded
+	} else {
+		nextRound := domain.Round{
+			Number:    len(game.Rounds) + 1,
+			Status:    domain.RoundStatusWaiting,
+			StartTime: time.Now(),
+			AnswerPool: domain.AnswerPool{
+				CorrectAnswer: "",
+				FakeAnswers:   make([]domain.Answer, 0),
+				FillerAnswers: make([]domain.Answer, 0),
+				Options:       make([]domain.Answer, 0),
+			},
+		}
+		game.Rounds = append(game.Rounds, nextRound)
 	}
-
-	// Mark round as completed
-	currentRound.Status = domain.RoundStatusCompleted
-	currentRound.EndTime = time.Now()
+	game.UpdatedAt = time.Now()
+	game.LastActivity = time.Now()
 
 	// Notify all players of round end and scores
 	payload, err := json.Marshal(game)
@@ -747,6 +775,11 @@ func (s *GameService) EndGame(ctx context.Context, code string) error {
 	// Clean up game session
 	if err := s.sessionMgr.DeleteGame(ctx, game.ID); err != nil {
 		return err
+	}
+	if game.Code != "" {
+		if err := s.sessionMgr.DeleteGame(ctx, game.Code); err != nil {
+			return err
+		}
 	}
 
 	return nil

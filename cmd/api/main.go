@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,11 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-playground/validator/v10"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"github.com/redis/go-redis/v9"
-	"github.com/zizouhuweidi/dahaa/internal/handler"
+	"github.com/zizouhuweidi/dahaa/internal/httpapi"
 	"github.com/zizouhuweidi/dahaa/internal/repository/postgres"
 	"github.com/zizouhuweidi/dahaa/internal/service"
 	"github.com/zizouhuweidi/dahaa/internal/session"
@@ -23,10 +20,14 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+
 	// Initialize database connection
 	pool, err := postgres.NewDB()
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		logger.Error("failed to connect to database", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -44,13 +45,15 @@ func main() {
 	// Test Redis connection
 	ctx := context.Background()
 	if err := redisClient.Ping(ctx).Err(); err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		logger.Error("failed to connect to redis", "error", err)
+		os.Exit(1)
 	}
 
 	// Initialize image storage
 	imageStorage, err := storage.NewImageStorage(filepath.Join("uploads", "images"))
 	if err != nil {
-		log.Fatalf("Failed to initialize image storage: %v", err)
+		logger.Error("failed to initialize image storage", "error", err)
+		os.Exit(1)
 	}
 
 	// Initialize repositories
@@ -70,66 +73,28 @@ func main() {
 	userService := service.NewUserService(userRepo, gameInviteRepo)
 	gameService := service.NewGameService(gameRepo, questionRepo, hub, sessionManager)
 
-	// Initialize handlers
-	userHandler := handler.NewUserHandler(userService)
-	gameHandler := handler.NewGameHandler(gameService, questionRepo)
-	wsHandler := handler.NewWebSocketHandler(hub)
-	imageHandler := handler.NewImageHandler(imageStorage)
-
-	// Initialize Echo
-	e := echo.New()
-
-	// Register custom validator
-	e.Validator = &handler.CustomValidator{Validator: validator.New()}
-
-	// Middleware
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
-	e.Use(middleware.CORS())
-
-	// Routes
-	api := e.Group("/api")
-
-	// User routes
-	users := api.Group("/users")
-	users.POST("/register", userHandler.Register)
-	users.POST("/login", userHandler.Login)
-	users.POST("/invites/:game_id/:to_user_id", userHandler.SendGameInvite)
-	users.POST("/invites/:invite_id/accept", userHandler.AcceptGameInvite)
-	users.POST("/invites/:invite_id/decline", userHandler.DeclineGameInvite)
-	users.GET("/invites", userHandler.GetPendingInvites)
-
-	// Game routes
-	games := api.Group("/games")
-	games.POST("", gameHandler.CreateGame)
-	games.GET("/:code", gameHandler.GetGame)
-	games.POST("/:code/join", gameHandler.JoinGame)
-	games.POST("/:code/start", gameHandler.StartGame)
-	games.POST("/:code/rounds/:round/answers", gameHandler.SubmitAnswer)
-	games.POST("/:code/rounds/:round/votes", gameHandler.SubmitVote)
-	games.POST("/:code/rounds/:round/end", gameHandler.EndRound)
-	games.POST("/:code/end", gameHandler.EndGame)
-
-	// WebSocket route
-	e.GET("/ws", wsHandler.HandleWebSocket)
-
-	// Image routes
-	e.POST("/api/images", imageHandler.UploadImage)
-	e.GET("/api/images/:filename", imageHandler.ServeImage)
-
-	// Health check endpoint
-	e.GET("/health", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{
-			"status": "ok",
-		})
+	apiServer := httpapi.NewServer(httpapi.Deps{
+		GameService:  gameService,
+		QuestionRepo: questionRepo,
+		UserService:  userService,
+		ImageStorage: imageStorage,
+		Hub:          hub,
 	})
+
+	server := &http.Server{
+		Addr:              ":8080",
+		Handler:           apiServer.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 
 	// Start server
 	go func() {
-		if err := e.Start(":8080"); err != nil && err != http.ErrServerClosed {
-			e.Logger.Fatal("shutting down the server")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("server failed", "error", err)
+			os.Exit(1)
 		}
 	}()
+	logger.Info("server started", "addr", server.Addr)
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
@@ -139,9 +104,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := e.Shutdown(ctx); err != nil {
-		e.Logger.Fatal(err)
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Error("server shutdown failed", "error", err)
+		os.Exit(1)
 	}
+	logger.Info("server stopped")
 }
 
 // getEnv gets an environment variable or returns a default value

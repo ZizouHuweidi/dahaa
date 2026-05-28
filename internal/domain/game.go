@@ -93,12 +93,21 @@ const (
 
 // Answer represents a player's answer
 type Answer struct {
-	ID        string    `json:"id"`
-	PlayerID  string    `json:"player_id"`
-	Text      string    `json:"text"`
-	Votes     []string  `json:"votes"` // List of player IDs who voted for this answer
-	CreatedAt time.Time `json:"created_at"`
+	ID        string     `json:"id"`
+	PlayerID  string     `json:"player_id"`
+	Text      string     `json:"text"`
+	Kind      AnswerKind `json:"kind"`
+	Votes     []string   `json:"votes"` // List of player IDs who voted for this answer
+	CreatedAt time.Time  `json:"created_at"`
 }
+
+type AnswerKind string
+
+const (
+	AnswerKindCorrect AnswerKind = "correct"
+	AnswerKindFake    AnswerKind = "fake"
+	AnswerKindFiller  AnswerKind = "filler"
+)
 
 // GameRepository defines the interface for game-related operations
 type GameRepository interface {
@@ -159,6 +168,7 @@ type AnswerPool struct {
 	CorrectAnswer string   `json:"correct_answer"`
 	FakeAnswers   []Answer `json:"fake_answers"`   // Player-submitted answers
 	FillerAnswers []Answer `json:"filler_answers"` // System-generated filler answers
+	Options       []Answer `json:"options"`        // Shuffled voting options
 }
 
 // Timer represents a game timer

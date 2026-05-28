@@ -1,3 +1,7 @@
+-- +goose Up
+-- +goose StatementBegin
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = CURRENT_TIMESTAMP;
 RETURN NEW;
@@ -52,3 +56,4 @@ COMMENT ON COLUMN games.players IS 'JSON array of player objects';
 COMMENT ON COLUMN games.rounds IS 'JSON array of round objects';
 COMMENT ON COLUMN questions.image_path IS 'Path to the question image file';
 COMMENT ON COLUMN questions.image_alt IS 'Alt text for the question image';
+-- +goose StatementEnd

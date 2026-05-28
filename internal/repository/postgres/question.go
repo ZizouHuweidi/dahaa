@@ -24,8 +24,9 @@ func NewQuestionRepository(pool *pgxpool.Pool) *QuestionRepository {
 // GetRandomQuestion retrieves a random question from a category
 func (r *QuestionRepository) GetRandomQuestion(ctx context.Context, category string) (*domain.Question, error) {
 	var question domain.Question
+	var fillerAnswers []string
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, text, answer, category, created_at, updated_at
+		SELECT id, text, answer, category, filler_answers, created_at, updated_at
 		FROM questions
 		WHERE category = $1
 		ORDER BY RANDOM()
@@ -35,6 +36,7 @@ func (r *QuestionRepository) GetRandomQuestion(ctx context.Context, category str
 		&question.Text,
 		&question.Answer,
 		&question.Category,
+		&fillerAnswers,
 		&question.CreatedAt,
 		&question.UpdatedAt,
 	)
@@ -44,6 +46,7 @@ func (r *QuestionRepository) GetRandomQuestion(ctx context.Context, category str
 		}
 		return nil, fmt.Errorf("failed to get random question: %w", err)
 	}
+	question.FillerAnswers = fillerAnswers
 	return &question, nil
 }
 

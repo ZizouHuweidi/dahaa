@@ -1,45 +1,27 @@
 package websocket
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
+	coderws "github.com/coder/websocket"
 )
 
 const (
-	// Time allowed to write a message to the peer
-	writeWait = 10 * time.Second
-
-	// Time allowed to read the next pong message from the peer
-	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period. Must be less than pongWait
-	pingPeriod = (pongWait * 9) / 10
-
-	// Maximum message size allowed from peer
-	maxMessageSize = 512
+	writeWait      = 10 * time.Second
+	pingPeriod     = 30 * time.Second
+	maxMessageSize = 4 << 10
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins
-	},
-}
-
-// Message represents a WebSocket message
 type Message struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload"`
 }
 
-// TimerMessage represents a timer update message
 type TimerMessage struct {
 	Type      string    `json:"type"`
 	StartTime time.Time `json:"start_time"`
@@ -47,43 +29,28 @@ type TimerMessage struct {
 	Duration  int       `json:"duration"`
 }
 
-// Client is a middleman between the websocket connection and the hub
 type Client struct {
 	Hub    *Hub
-	Conn   *websocket.Conn
+	Conn   *coderws.Conn
 	GameID string
 	Send   chan []byte
 }
 
-// Hub maintains the set of active clients and broadcasts messages
 type Hub struct {
-	// Registered clients
-	clients map[*Client]bool
-
-	// Inbound messages from the clients
-	broadcast chan []byte
-
-	// Register requests from the clients
-	register chan *Client
-
-	// Unregister requests from clients
+	clients    map[*Client]bool
+	register   chan *Client
 	unregister chan *Client
-
-	// Mutex for thread-safe operations
-	mu sync.RWMutex
+	mu         sync.RWMutex
 }
 
-// NewHub creates a new hub instance
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:  make(chan []byte),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		clients:    make(map[*Client]bool),
 	}
 }
 
-// Run starts the hub
 func (h *Hub) Run() {
 	for {
 		select {
@@ -91,7 +58,6 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[client] = true
 			h.mu.Unlock()
-
 		case client := <-h.unregister:
 			h.mu.Lock()
 			if _, ok := h.clients[client]; ok {
@@ -99,54 +65,35 @@ func (h *Hub) Run() {
 				close(client.Send)
 			}
 			h.mu.Unlock()
-
-		case message := <-h.broadcast:
-			h.mu.RLock()
-			for client := range h.clients {
-				select {
-				case client.Send <- message:
-				default:
-					close(client.Send)
-					delete(h.clients, client)
-				}
-			}
-			h.mu.RUnlock()
 		}
 	}
 }
 
-// BroadcastToGame sends a message to all clients in a specific game
 func (h *Hub) BroadcastToGame(gameID string, messageType string, payload []byte) {
-	message := Message{
-		Type:    messageType,
-		Payload: payload,
-	}
-
+	message := Message{Type: messageType, Payload: payload}
 	messageBytes, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("Error marshaling message: %v", err)
+		slog.Error("failed to marshal websocket message", "error", err)
 		return
 	}
 
 	h.mu.RLock()
+	defer h.mu.RUnlock()
 	for client := range h.clients {
-		if client.GameID == gameID {
-			select {
-			case client.Send <- messageBytes:
-			default:
-				close(client.Send)
-				delete(h.clients, client)
-			}
+		if client.GameID != gameID {
+			continue
+		}
+		select {
+		case client.Send <- messageBytes:
+		default:
+			go func(c *Client) { h.unregister <- c }(client)
 		}
 	}
-	h.mu.RUnlock()
 }
 
-// GetGameClients returns the number of connected clients for a game
 func (h *Hub) GetGameClients(gameID string) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-
 	count := 0
 	for client := range h.clients {
 		if client.GameID == gameID {
@@ -156,187 +103,136 @@ func (h *Hub) GetGameClients(gameID string) int {
 	return count
 }
 
-// CloseGame closes all connections for a game
 func (h *Hub) CloseGame(gameID string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
+	h.mu.RLock()
+	var clients []*Client
 	for client := range h.clients {
 		if client.GameID == gameID {
-			close(client.Send)
-			delete(h.clients, client)
+			clients = append(clients, client)
 		}
+	}
+	h.mu.RUnlock()
+	for _, client := range clients {
+		h.unregister <- client
 	}
 }
 
-// StartTimer starts a timer for a game
 func (h *Hub) StartTimer(gameID string, timerType string, duration int) {
 	startTime := time.Now()
 	endTime := startTime.Add(time.Duration(duration) * time.Second)
-
-	message := TimerMessage{
-		Type:      timerType,
-		StartTime: startTime,
-		EndTime:   endTime,
-		Duration:  duration,
-	}
-
+	message := TimerMessage{Type: timerType, StartTime: startTime, EndTime: endTime, Duration: duration}
 	messageBytes, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("Error marshaling timer message: %v", err)
+		slog.Error("failed to marshal timer message", "error", err)
 		return
 	}
-
 	h.BroadcastToGame(gameID, "timer_started", messageBytes)
 
-	// Start a goroutine to send timer updates
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
-
 		for range ticker.C {
 			remaining := int(time.Until(endTime).Seconds())
 			if remaining <= 0 {
 				h.BroadcastToGame(gameID, "timer_ended", messageBytes)
 				return
 			}
-
-			update := TimerMessage{
-				Type:      timerType,
-				StartTime: startTime,
-				EndTime:   endTime,
-				Duration:  remaining,
-			}
-
+			update := TimerMessage{Type: timerType, StartTime: startTime, EndTime: endTime, Duration: remaining}
 			updateBytes, err := json.Marshal(update)
 			if err != nil {
-				log.Printf("Error marshaling timer update: %v", err)
+				slog.Error("failed to marshal timer update", "error", err)
 				return
 			}
-
 			h.BroadcastToGame(gameID, "timer_update", updateBytes)
 		}
 	}()
 }
 
-// Register registers a new client with the hub
 func (h *Hub) Register(client *Client) {
 	h.register <- client
 }
 
-// Handler handles WebSocket connections
 type Handler struct {
 	hub *Hub
 }
 
-// NewHandler creates a new WebSocket handler
 func NewHandler(hub *Hub) *Handler {
-	return &Handler{
-		hub: hub,
-	}
+	return &Handler{hub: hub}
 }
 
-// ServeWS handles WebSocket requests from clients
 func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	gameID := r.URL.Query().Get("game_id")
 	if gameID == "" {
-		http.Error(w, "game_id is required", http.StatusBadRequest)
+		gameID = r.URL.Query().Get("game_code")
+	}
+	if gameID == "" {
+		http.Error(w, "game_id or game_code is required", http.StatusBadRequest)
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{
+		InsecureSkipVerify: true,
+		CompressionMode:    coderws.CompressionContextTakeover,
+	})
 	if err != nil {
-		log.Printf("Failed to upgrade connection: %v", err)
+		slog.Error("failed to accept websocket", "error", err)
 		return
 	}
+	conn.SetReadLimit(maxMessageSize)
 
-	client := &Client{
-		Hub:    h.hub,
-		Conn:   conn,
-		Send:   make(chan []byte, 256),
-		GameID: gameID,
-	}
+	client := &Client{Hub: h.hub, Conn: conn, Send: make(chan []byte, 256), GameID: gameID}
+	h.hub.Register(client)
 
-	client.Hub.register <- client
-
-	// Start goroutines for reading and writing
-	go client.WritePump()
-	go client.ReadPump()
+	go client.WritePump(r.Context())
+	go client.ReadPump(r.Context())
 }
 
-// ReadPump pumps messages from the WebSocket connection to the hub
-func (c *Client) ReadPump() {
+func (c *Client) ReadPump(ctx context.Context) {
 	defer func() {
 		c.Hub.unregister <- c
-		c.Conn.Close()
+		_ = c.Conn.Close(coderws.StatusNormalClosure, "")
 	}()
 
-	c.Conn.SetReadLimit(maxMessageSize)
-	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.Conn.SetPongHandler(func(string) error {
-		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
-	})
-
 	for {
-		_, message, err := c.Conn.ReadMessage()
+		_, data, err := c.Conn.Read(ctx)
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
-			}
-			break
+			return
 		}
-
-		message = bytes.TrimSpace(bytes.ReplaceAll(message, newline, space))
-		c.Hub.broadcast <- message
+		if !json.Valid(data) {
+			continue
+		}
+		c.Hub.BroadcastToGame(c.GameID, "client_message", data)
 	}
 }
 
-// WritePump pumps messages from the hub to the WebSocket connection
-func (c *Client) WritePump() {
+func (c *Client) WritePump(ctx context.Context) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.Conn.Close()
+		_ = c.Conn.Close(coderws.StatusNormalClosure, "")
 	}()
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case message, ok := <-c.Send:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-
-			w, err := c.Conn.NextWriter(websocket.TextMessage)
+			writeCtx, cancel := context.WithTimeout(ctx, writeWait)
+			err := c.Conn.Write(writeCtx, coderws.MessageText, message)
+			cancel()
 			if err != nil {
 				return
 			}
-			w.Write(message)
-
-			// Add queued messages to the current websocket message
-			n := len(c.Send)
-			for i := 0; i < n; i++ {
-				w.Write(newline)
-				w.Write(<-c.Send)
-			}
-
-			if err := w.Close(); err != nil {
-				return
-			}
-
 		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			pingCtx, cancel := context.WithTimeout(ctx, writeWait)
+			err := c.Conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
 				return
 			}
 		}
 	}
 }
-
-var (
-	newline = []byte{'\n'}
-	space   = []byte{' '}
-)
