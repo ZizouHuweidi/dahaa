@@ -1,78 +1,87 @@
-# Dahaa Game Frontend
+# Welcome to React Router!
 
-A modern web-based implementation of the Dahaa Game using React, TypeScript, and Vite.
+A modern, production-ready template for building full-stack React applications using React Router.
+
+[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
 
 ## Features
 
-- Token-based authentication
-- Responsive design with Tailwind CSS
-- Modern UI components with shadcn/ui
-- State management with Zustand
-- TypeScript for type safety
-- PWA support (coming soon)
+- 🚀 Server-side rendering
+- ⚡️ Hot Module Replacement (HMR)
+- 📦 Asset bundling and optimization
+- 🔄 Data loading and mutations
+- 🔒 TypeScript by default
+- 🎉 TailwindCSS for styling
+- 📖 [React Router docs](https://reactrouter.com/)
 
-## Prerequisites
+## Getting Started
 
-- Node.js 18+ and npm/yarn
-- Backend API running (default: http://localhost:8080)
+### Installation
 
-## Setup
+Install the dependencies:
 
-1. Clone the repository
-2. Install dependencies:
-
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
-
-3. Create a `.env` file in the root directory with the following content:
-
-   ```
-   VITE_API_URL=http://localhost:8080
-   ```
-
-   Adjust the URL if your backend is running on a different port or host.
-
-4. Start the development server:
-
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
-
-5. Open http://localhost:3000 in your browser
-
-## Available Scripts
-
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
-
-## Project Structure
-
-```
-dahaa-frontend/
-├── app/                    # Application source code
-│   ├── components/        # Reusable components
-│   ├── lib/              # Utilities and store
-│   ├── pages/            # Page components
-│   └── globals.css       # Global styles
-├── public/               # Static assets
-└── ...config files
+```bash
+npm install
 ```
 
-## Contributing
+### Development
 
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+Start the development server with HMR:
 
-## License
+```bash
+npm run dev
+```
 
-MIT
+Your application will be available at `http://localhost:5173`.
+
+## Building for Production
+
+Create a production build:
+
+```bash
+npm run build
+```
+
+## Deployment
+
+### Docker Deployment
+
+To build and run using Docker:
+
+```bash
+docker build -t my-app .
+
+# Run the container
+docker run -p 3000:3000 my-app
+```
+
+The containerized application can be deployed to any platform that supports Docker, including:
+
+- AWS ECS
+- Google Cloud Run
+- Azure Container Apps
+- Digital Ocean App Platform
+- Fly.io
+- Railway
+
+### DIY Deployment
+
+If you're familiar with deploying Node applications, the built-in app server is production-ready.
+
+Make sure to deploy the output of `npm run build`
+
+```
+├── package.json
+├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
+├── build/
+│   ├── client/    # Static assets
+│   └── server/    # Server-side code
+```
+
+## Styling
+
+This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
+
+---
+
+Built with ❤️ using React Router.

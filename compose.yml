@@ -39,14 +39,14 @@ services:
       - redis
     restart: unless-stopped
 
-  web:
+  frontend:
     build:
       context: ./frontend
       dockerfile: Containerfile
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - api
     restart: unless-stopped

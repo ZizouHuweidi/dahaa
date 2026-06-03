@@ -32,6 +32,14 @@ test:
 fmt:
     gofumpt -w .
 
+# Check frontend formatting/linting with Biome.
+frontend-check:
+    npm --prefix frontend run check
+
+# Format frontend files with Biome.
+frontend-format:
+    npm --prefix frontend run format:write
+
 # Start the full stack with Podman Compose.
 up:
     {{compose}} -f {{compose_file}} up --build
@@ -111,3 +119,9 @@ frontend-build:
 
 frontend-typecheck:
     npm --prefix frontend run typecheck
+
+# Verify frontend typecheck, Biome, and production build.
+frontend-verify: frontend-typecheck frontend-check frontend-build
+
+# Verify backend and frontend locally.
+verify: test frontend-verify
