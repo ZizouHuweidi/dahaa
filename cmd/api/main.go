@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/zizouhuweidi/dahaa/internal/httpapi"
+	"github.com/zizouhuweidi/dahaa/internal/handler"
 	"github.com/zizouhuweidi/dahaa/internal/repository/postgres"
 	"github.com/zizouhuweidi/dahaa/internal/service"
 	"github.com/zizouhuweidi/dahaa/internal/session"
@@ -73,7 +73,7 @@ func main() {
 	userService := service.NewUserService(userRepo, gameInviteRepo)
 	gameService := service.NewGameService(gameRepo, questionRepo, hub, sessionManager)
 
-	apiServer := httpapi.NewServer(httpapi.Deps{
+	apiServer := handler.NewServer(handler.Deps{
 		GameService:  gameService,
 		QuestionRepo: questionRepo,
 		UserService:  userService,
@@ -81,9 +81,10 @@ func main() {
 		Hub:          hub,
 	})
 
+	e := apiServer.Echo()
 	server := &http.Server{
 		Addr:              ":8080",
-		Handler:           apiServer.Handler(),
+		Handler:           e,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -94,7 +95,7 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-	logger.Info("server started", "addr", server.Addr)
+	logger.Info("server started", "addr", ":8080")
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)

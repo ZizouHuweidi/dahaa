@@ -1,6 +1,5 @@
 -- +goose Up
 -- +goose StatementBegin
--- Create users table
 CREATE TABLE users (
     id VARCHAR(36) PRIMARY KEY,
     username VARCHAR(32) UNIQUE NOT NULL,
@@ -15,7 +14,6 @@ CREATE TABLE users (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- Create game_invites table
 CREATE TABLE game_invites (
     id VARCHAR(36) PRIMARY KEY,
     game_id VARCHAR(36) NOT NULL,
@@ -26,10 +24,21 @@ CREATE TABLE game_invites (
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- Create indexes
 CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_game_invites_game_id ON game_invites(game_id);
 CREATE INDEX idx_game_invites_to_user ON game_invites(to_user);
-CREATE INDEX idx_game_invites_status ON game_invites(status); 
+CREATE INDEX idx_game_invites_status ON game_invites(status);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS idx_users_username;
+DROP INDEX IF EXISTS idx_users_email;
+DROP INDEX IF EXISTS idx_game_invites_game_id;
+DROP INDEX IF EXISTS idx_game_invites_to_user;
+DROP INDEX IF EXISTS idx_game_invites_status;
+
+DROP TABLE IF EXISTS game_invites;
+DROP TABLE IF EXISTS users;
 -- +goose StatementEnd

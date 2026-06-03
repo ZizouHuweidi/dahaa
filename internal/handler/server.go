@@ -1,9 +1,10 @@
-package httpapi
+package handler
 
 import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/zizouhuweidi/dahaa/internal/domain"
@@ -26,7 +27,8 @@ type Deps struct {
 
 func NewServer(deps Deps) *Server {
 	e := echo.New()
-	e.Binder = strictJSONBinder{}
+	e.Binder = StrictJSONBinder{}
+	e.Validator = &Validator{validator: validator.New()}
 	e.HTTPErrorHandler = httpErrorHandler
 	e.Use(middleware.RequestID())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
@@ -91,7 +93,10 @@ func NewServer(deps Deps) *Server {
 	images.POST("", imageHandler.UploadImage, middleware.BodyLimit(6<<20))
 	images.GET("/:filename", imageHandler.ServeImage)
 
-	e.GET("/ws", echo.WrapHandler(http.HandlerFunc(wsHandler.ServeWS)))
+	e.GET("/ws", func(c *echo.Context) error {
+		wsHandler.ServeWS(c.Response(), c.Request())
+		return nil
+	})
 	e.GET("/health", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -100,5 +105,9 @@ func NewServer(deps Deps) *Server {
 }
 
 func (s *Server) Handler() http.Handler {
+	return s.e
+}
+
+func (s *Server) Echo() *echo.Echo {
 	return s.e
 }

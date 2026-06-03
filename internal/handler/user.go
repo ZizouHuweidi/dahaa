@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"errors"
@@ -22,8 +22,8 @@ func (h *UserHandler) Register(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if req.Username == "" || req.Email == "" || req.Password == "" || req.DisplayName == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "username, email, password, and display_name are required")
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	user, err := h.userService.Register(c.Request().Context(), req)
 	if err != nil {
@@ -40,8 +40,8 @@ func (h *UserHandler) Login(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if req.Username == "" || req.Password == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "username and password are required")
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	token, err := h.userService.Login(c.Request().Context(), req)
 	if err != nil {

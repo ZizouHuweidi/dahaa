@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"encoding/json"
@@ -14,9 +14,9 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-type strictJSONBinder struct{}
+type StrictJSONBinder struct{}
 
-func (strictJSONBinder) Bind(c *echo.Context, dst any) error {
+func (StrictJSONBinder) Bind(c *echo.Context, dst any) error {
 	r := c.Request()
 	if r.Body == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")

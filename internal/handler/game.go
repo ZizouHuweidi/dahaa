@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"net/http"
@@ -17,8 +17,8 @@ func NewGameHandler(gameService domain.GameService, questionRepo domain.Question
 }
 
 type createGameRequest struct {
-	Code     string               `json:"code"`
-	Player   domain.Player        `json:"player"`
+	Code     string               `json:"code" validate:"omitempty,min=4,max=6"`
+	Player   domain.Player        `json:"player" validate:"required"`
 	Settings *domain.GameSettings `json:"settings"`
 }
 
@@ -26,6 +26,9 @@ func (h *GameHandler) CreateGame(c *echo.Context) error {
 	var req createGameRequest
 	if err := c.Bind(&req); err != nil {
 		return err
+	}
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if req.Player.ID == "" || req.Player.Name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "player id and name are required")
@@ -47,10 +50,13 @@ func (h *GameHandler) GetGame(c *echo.Context) error {
 
 func (h *GameHandler) JoinGame(c *echo.Context) error {
 	var req struct {
-		Player domain.Player `json:"player"`
+		Player domain.Player `json:"player" validate:"required"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return err
+	}
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if req.Player.ID == "" || req.Player.Name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "player id and name are required")
@@ -70,13 +76,13 @@ func (h *GameHandler) StartGame(c *echo.Context) error {
 
 func (h *GameHandler) StartTurn(c *echo.Context) error {
 	var req struct {
-		PlayerID string `json:"player_id"`
+		PlayerID string `json:"player_id" validate:"required"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if req.PlayerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "player_id is required")
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.gameService.StartTurn(c.Request().Context(), c.Param("code"), req.PlayerID); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -86,13 +92,13 @@ func (h *GameHandler) StartTurn(c *echo.Context) error {
 
 func (h *GameHandler) SelectCategory(c *echo.Context) error {
 	var req struct {
-		Category string `json:"category"`
+		Category string `json:"category" validate:"required"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if req.Category == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "category is required")
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.gameService.SelectCategory(c.Request().Context(), c.Param("code"), req.Category); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -102,14 +108,14 @@ func (h *GameHandler) SelectCategory(c *echo.Context) error {
 
 func (h *GameHandler) SubmitAnswer(c *echo.Context) error {
 	var req struct {
-		PlayerID string `json:"player_id"`
-		Answer   string `json:"answer"`
+		PlayerID string `json:"player_id" validate:"required"`
+		Answer   string `json:"answer" validate:"required"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if req.PlayerID == "" || req.Answer == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "player_id and answer are required")
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.gameService.SubmitAnswer(c.Request().Context(), c.Param("code"), req.PlayerID, req.Answer); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -119,14 +125,14 @@ func (h *GameHandler) SubmitAnswer(c *echo.Context) error {
 
 func (h *GameHandler) SubmitVote(c *echo.Context) error {
 	var req struct {
-		PlayerID string `json:"player_id"`
-		AnswerID string `json:"answer_id"`
+		PlayerID string `json:"player_id" validate:"required"`
+		AnswerID string `json:"answer_id" validate:"required"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if req.PlayerID == "" || req.AnswerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "player_id and answer_id are required")
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.gameService.SubmitVote(c.Request().Context(), c.Param("code"), req.PlayerID, req.AnswerID); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -149,21 +155,21 @@ func (h *GameHandler) EndGame(c *echo.Context) error {
 }
 
 type createQuestionRequest struct {
-	Category      string   `json:"category"`
-	Text          string   `json:"text"`
-	Answer        string   `json:"answer"`
-	FillerAnswers []string `json:"filler_answers"`
+	Category      string   `json:"category" validate:"required"`
+	Text          string   `json:"text" validate:"required"`
+	Answer        string   `json:"answer" validate:"required"`
+	FillerAnswers []string `json:"filler_answers" validate:"required,min=3"`
 }
 
 func (h *GameHandler) BulkCreateQuestions(c *echo.Context) error {
 	var req struct {
-		Questions []createQuestionRequest `json:"questions"`
+		Questions []createQuestionRequest `json:"questions" validate:"required,min=1,dive"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if len(req.Questions) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "questions are required")
+	if err := c.Validate(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	questions := make([]*domain.Question, 0, len(req.Questions))
 	for _, q := range req.Questions {
