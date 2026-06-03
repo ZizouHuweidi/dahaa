@@ -18,11 +18,13 @@ type Server struct {
 }
 
 type Deps struct {
-	GameService  domain.GameService
-	QuestionRepo domain.QuestionRepository
-	UserService  *service.UserService
-	ImageStorage *storage.ImageStorage
-	Hub          *ws.Hub
+	GameService        domain.GameService
+	QuestionRepo       domain.QuestionRepository
+	UserService        *service.UserService
+	ImageStorage       *storage.ImageStorage
+	Hub                *ws.Hub
+	CORSAllowedOrigins []string
+	Ready              func(*echo.Context) error
 }
 
 func NewServer(deps Deps) *Server {
@@ -56,8 +58,12 @@ func NewServer(deps Deps) *Server {
 		},
 	}))
 	e.Use(middleware.Recover())
+	allowedOrigins := deps.CORSAllowedOrigins
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"*"},
+		AllowOrigins: allowedOrigins,
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodOptions},
 		AllowHeaders: []string{echo.HeaderContentType, echo.HeaderAuthorization},
 	}))
@@ -100,6 +106,9 @@ func NewServer(deps Deps) *Server {
 	e.GET("/health", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
+	if deps.Ready != nil {
+		e.GET("/ready", deps.Ready)
+	}
 
 	return &Server{e: e}
 }

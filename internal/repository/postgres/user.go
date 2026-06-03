@@ -7,71 +7,46 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zizouhuweidi/dahaa/internal/db"
+	"github.com/zizouhuweidi/dahaa/internal/db/dbgen"
 	"github.com/zizouhuweidi/dahaa/internal/domain"
 )
 
 // UserRepository implements domain.UserRepository
 type UserRepository struct {
-	pool *pgxpool.Pool
+	queries *dbgen.Queries
 }
 
 // NewUserRepository creates a new user repository
 func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
-	return &UserRepository{pool: pool}
+	return &UserRepository{queries: dbgen.New(pool)}
 }
 
 // Create creates a new user
 func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
-	query := `
-		INSERT INTO users (
-			id, username, email, password_hash, display_name,
-			games_played, games_won, total_points,
-			last_login_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-	`
-
-	_, err := r.pool.Exec(ctx, query,
-		user.ID,
-		user.Username,
-		user.Email,
-		user.PasswordHash,
-		user.DisplayName,
-		user.Stats.GamesPlayed,
-		user.Stats.GamesWon,
-		user.Stats.TotalPoints,
-		user.LastLoginAt,
-		user.CreatedAt,
-		user.UpdatedAt,
-	)
-
+	row, err := r.queries.CreateUser(ctx, dbgen.CreateUserParams{
+		ID:           user.ID,
+		Username:     user.Username,
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		DisplayName:  user.DisplayName,
+		GamesPlayed:  int32(user.Stats.GamesPlayed),
+		GamesWon:     int32(user.Stats.GamesWon),
+		TotalPoints:  int32(user.Stats.TotalPoints),
+		LastLoginAt:  db.PGTimestamptz(user.LastLoginAt),
+		CreatedAt:    db.PGTimestamptz(user.CreatedAt),
+		UpdatedAt:    db.PGTimestamptz(user.UpdatedAt),
+	})
+	if err != nil {
+		return err
+	}
+	applyDBUser(user, row)
 	return err
 }
 
 // GetByID retrieves a user by ID
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
-	query := `
-		SELECT id, username, email, password_hash, display_name,
-			games_played, games_won, total_points,
-			last_login_at, created_at, updated_at
-		FROM users
-		WHERE id = $1
-	`
-
-	user := &domain.User{}
-	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&user.ID,
-		&user.Username,
-		&user.Email,
-		&user.PasswordHash,
-		&user.DisplayName,
-		&user.Stats.GamesPlayed,
-		&user.Stats.GamesWon,
-		&user.Stats.TotalPoints,
-		&user.LastLoginAt,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-	)
-
+	row, err := r.queries.GetUserByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
@@ -79,34 +54,12 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, 
 		return nil, err
 	}
 
-	return user, nil
+	return dbUserToDomain(row), nil
 }
 
 // GetByUsername retrieves a user by username
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
-	query := `
-		SELECT id, username, email, password_hash, display_name,
-			games_played, games_won, total_points,
-			last_login_at, created_at, updated_at
-		FROM users
-		WHERE username = $1
-	`
-
-	user := &domain.User{}
-	err := r.pool.QueryRow(ctx, query, username).Scan(
-		&user.ID,
-		&user.Username,
-		&user.Email,
-		&user.PasswordHash,
-		&user.DisplayName,
-		&user.Stats.GamesPlayed,
-		&user.Stats.GamesWon,
-		&user.Stats.TotalPoints,
-		&user.LastLoginAt,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-	)
-
+	row, err := r.queries.GetUserByUsername(ctx, username)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
@@ -114,34 +67,12 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*d
 		return nil, err
 	}
 
-	return user, nil
+	return dbUserToDomain(row), nil
 }
 
 // GetByEmail retrieves a user by email
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	query := `
-		SELECT id, username, email, password_hash, display_name,
-			games_played, games_won, total_points,
-			last_login_at, created_at, updated_at
-		FROM users
-		WHERE email = $1
-	`
-
-	user := &domain.User{}
-	err := r.pool.QueryRow(ctx, query, email).Scan(
-		&user.ID,
-		&user.Username,
-		&user.Email,
-		&user.PasswordHash,
-		&user.DisplayName,
-		&user.Stats.GamesPlayed,
-		&user.Stats.GamesWon,
-		&user.Stats.TotalPoints,
-		&user.LastLoginAt,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-	)
-
+	row, err := r.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
@@ -149,66 +80,63 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 		return nil, err
 	}
 
-	return user, nil
+	return dbUserToDomain(row), nil
 }
 
 // Update updates a user
 func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
-	query := `
-		UPDATE users
-		SET username = $1,
-			email = $2,
-			password_hash = $3,
-			display_name = $4,
-			games_played = $5,
-			games_won = $6,
-			total_points = $7,
-			last_login_at = $8,
-			updated_at = $9
-		WHERE id = $10
-	`
-
-	_, err := r.pool.Exec(ctx, query,
-		user.Username,
-		user.Email,
-		user.PasswordHash,
-		user.DisplayName,
-		user.Stats.GamesPlayed,
-		user.Stats.GamesWon,
-		user.Stats.TotalPoints,
-		user.LastLoginAt,
-		time.Now(),
-		user.ID,
-	)
-
+	row, err := r.queries.UpdateUser(ctx, dbgen.UpdateUserParams{
+		Username:     user.Username,
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		DisplayName:  user.DisplayName,
+		GamesPlayed:  int32(user.Stats.GamesPlayed),
+		GamesWon:     int32(user.Stats.GamesWon),
+		TotalPoints:  int32(user.Stats.TotalPoints),
+		LastLoginAt:  db.PGTimestamptz(user.LastLoginAt),
+		UpdatedAt:    db.PGTimestamptz(time.Now()),
+		ID:           user.ID,
+	})
+	if err != nil {
+		return err
+	}
+	applyDBUser(user, row)
 	return err
 }
 
 // Delete deletes a user
 func (r *UserRepository) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM users WHERE id = $1`
-	_, err := r.pool.Exec(ctx, query, id)
-	return err
+	return r.queries.DeleteUser(ctx, id)
 }
 
 // UpdateStats updates a user's game statistics
 func (r *UserRepository) UpdateStats(ctx context.Context, id string, stats domain.UserStats) error {
-	query := `
-		UPDATE users
-		SET games_played = $1,
-			games_won = $2,
-			total_points = $3,
-			updated_at = $4
-		WHERE id = $5
-	`
-
-	_, err := r.pool.Exec(ctx, query,
-		stats.GamesPlayed,
-		stats.GamesWon,
-		stats.TotalPoints,
-		time.Now(),
-		id,
-	)
-
+	_, err := r.queries.UpdateUserStats(ctx, dbgen.UpdateUserStatsParams{
+		GamesPlayed: int32(stats.GamesPlayed),
+		GamesWon:    int32(stats.GamesWon),
+		TotalPoints: int32(stats.TotalPoints),
+		UpdatedAt:   db.PGTimestamptz(time.Now()),
+		ID:          id,
+	})
 	return err
+}
+
+func dbUserToDomain(row dbgen.User) *domain.User {
+	user := &domain.User{}
+	applyDBUser(user, row)
+	return user
+}
+
+func applyDBUser(user *domain.User, row dbgen.User) {
+	user.ID = row.ID
+	user.Username = row.Username
+	user.Email = row.Email
+	user.PasswordHash = row.PasswordHash
+	user.DisplayName = row.DisplayName
+	user.Stats.GamesPlayed = int(row.GamesPlayed)
+	user.Stats.GamesWon = int(row.GamesWon)
+	user.Stats.TotalPoints = int(row.TotalPoints)
+	user.LastLoginAt = db.Time(row.LastLoginAt)
+	user.CreatedAt = db.Time(row.CreatedAt)
+	user.UpdatedAt = db.Time(row.UpdatedAt)
 }

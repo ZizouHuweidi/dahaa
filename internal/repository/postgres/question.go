@@ -6,177 +6,131 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/zizouhuweidi/dahaa/internal/db"
+	"github.com/zizouhuweidi/dahaa/internal/db/dbgen"
 	"github.com/zizouhuweidi/dahaa/internal/domain"
 )
 
 // QuestionRepository implements the domain.QuestionRepository interface
 type QuestionRepository struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	queries *dbgen.Queries
 }
 
 // NewQuestionRepository creates a new question repository
 func NewQuestionRepository(pool *pgxpool.Pool) *QuestionRepository {
 	return &QuestionRepository{
-		pool: pool,
+		pool:    pool,
+		queries: dbgen.New(pool),
 	}
 }
 
 // GetRandomQuestion retrieves a random question from a category
 func (r *QuestionRepository) GetRandomQuestion(ctx context.Context, category string) (*domain.Question, error) {
-	var question domain.Question
-	var fillerAnswers []string
-	err := r.pool.QueryRow(ctx, `
-		SELECT id, text, answer, category, filler_answers, created_at, updated_at
-		FROM questions
-		WHERE category = $1
-		ORDER BY RANDOM()
-		LIMIT 1
-	`, category).Scan(
-		&question.ID,
-		&question.Text,
-		&question.Answer,
-		&question.Category,
-		&fillerAnswers,
-		&question.CreatedAt,
-		&question.UpdatedAt,
-	)
+	row, err := r.queries.GetRandomQuestion(ctx, category)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("no questions found for category: %s", category)
 		}
 		return nil, fmt.Errorf("failed to get random question: %w", err)
 	}
-	question.FillerAnswers = fillerAnswers
+	question := domain.Question{
+		ID:            db.StringFromPGUUID(row.ID),
+		Text:          row.Text,
+		Answer:        row.Answer,
+		Category:      row.Category,
+		FillerAnswers: row.FillerAnswers,
+		CreatedAt:     db.Time(row.CreatedAt),
+		UpdatedAt:     db.Time(row.UpdatedAt),
+	}
 	return &question, nil
 }
 
 // GetCategories retrieves all available categories
 func (r *QuestionRepository) GetCategories(ctx context.Context) ([]string, error) {
-	query := `
-		SELECT DISTINCT category
-		FROM questions
-		ORDER BY category
-	`
-
-	rows, err := r.pool.Query(ctx, query)
+	categories, err := r.queries.GetQuestionCategories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get categories: %w", err)
 	}
-	defer rows.Close()
-
-	var categories []string
-	for rows.Next() {
-		var category string
-		if err := rows.Scan(&category); err != nil {
-			return nil, fmt.Errorf("failed to scan category: %w", err)
-		}
-		categories = append(categories, category)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating categories: %w", err)
-	}
-
 	return categories, nil
-}
-
-// GetDifficulties retrieves all available difficulty levels
-func (r *QuestionRepository) GetDifficulties(ctx context.Context) ([]string, error) {
-	query := `
-		SELECT DISTINCT difficulty
-		FROM questions
-		ORDER BY difficulty
-	`
-
-	rows, err := r.pool.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get difficulties: %w", err)
-	}
-	defer rows.Close()
-
-	var difficulties []string
-	for rows.Next() {
-		var difficulty string
-		if err := rows.Scan(&difficulty); err != nil {
-			return nil, fmt.Errorf("failed to scan difficulty: %w", err)
-		}
-		difficulties = append(difficulties, difficulty)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating difficulties: %w", err)
-	}
-
-	return difficulties, nil
 }
 
 // GetByID retrieves a question by its ID
 func (r *QuestionRepository) GetByID(ctx context.Context, id string) (*domain.Question, error) {
-	var question domain.Question
-	var fillerAnswers []string
-	err := r.pool.QueryRow(ctx, `
-		SELECT id, text, answer, category, filler_answers, created_at, updated_at
-		FROM questions
-		WHERE id = $1
-	`, id).Scan(
-		&question.ID,
-		&question.Text,
-		&question.Answer,
-		&question.Category,
-		&fillerAnswers,
-		&question.CreatedAt,
-		&question.UpdatedAt,
-	)
+	questionID, err := db.PGUUIDFromString(id)
+	if err != nil {
+		return nil, domain.ErrQuestionNotFound
+	}
+	row, err := r.queries.GetQuestionByID(ctx, questionID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, domain.ErrQuestionNotFound
 		}
 		return nil, fmt.Errorf("failed to get question: %w", err)
 	}
-	question.FillerAnswers = fillerAnswers
+	question := domain.Question{
+		ID:            db.StringFromPGUUID(row.ID),
+		Text:          row.Text,
+		Answer:        row.Answer,
+		Category:      row.Category,
+		FillerAnswers: row.FillerAnswers,
+		CreatedAt:     db.Time(row.CreatedAt),
+		UpdatedAt:     db.Time(row.UpdatedAt),
+	}
 	return &question, nil
 }
 
 // CreateQuestion creates a new question
 func (r *QuestionRepository) CreateQuestion(ctx context.Context, question *domain.Question) error {
-	query := `
-		INSERT INTO questions (text, answer, category, filler_answers)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, created_at, updated_at
-	`
-	return r.pool.QueryRow(ctx, query,
-		question.Text,
-		question.Answer,
-		question.Category,
-		question.FillerAnswers,
-	).Scan(&question.ID, &question.CreatedAt, &question.UpdatedAt)
+	row, err := r.queries.CreateQuestion(ctx, dbgen.CreateQuestionParams{
+		Text:          question.Text,
+		Answer:        question.Answer,
+		Category:      question.Category,
+		FillerAnswers: question.FillerAnswers,
+	})
+	if err != nil {
+		return err
+	}
+	question.ID = db.StringFromPGUUID(row.ID)
+	question.CreatedAt = db.Time(row.CreatedAt)
+	question.UpdatedAt = db.Time(row.UpdatedAt)
+	return nil
 }
 
 // UpdateQuestion updates an existing question
 func (r *QuestionRepository) UpdateQuestion(ctx context.Context, question *domain.Question) error {
-	query := `
-		UPDATE questions
-		SET text = $1, answer = $2, category = $3, filler_answers = $4, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $5
-		RETURNING updated_at
-	`
-	return r.pool.QueryRow(ctx, query,
-		question.Text,
-		question.Answer,
-		question.Category,
-		question.FillerAnswers,
-		question.ID,
-	).Scan(&question.UpdatedAt)
+	questionID, err := db.PGUUIDFromString(question.ID)
+	if err != nil {
+		return domain.ErrQuestionNotFound
+	}
+	row, err := r.queries.UpdateQuestion(ctx, dbgen.UpdateQuestionParams{
+		Text:          question.Text,
+		Answer:        question.Answer,
+		Category:      question.Category,
+		FillerAnswers: question.FillerAnswers,
+		ID:            questionID,
+	})
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return domain.ErrQuestionNotFound
+		}
+		return err
+	}
+	question.UpdatedAt = db.Time(row.UpdatedAt)
+	return nil
 }
 
 // DeleteQuestion deletes a question
 func (r *QuestionRepository) DeleteQuestion(ctx context.Context, id string) error {
-	query := `DELETE FROM questions WHERE id = $1`
-	result, err := r.pool.Exec(ctx, query, id)
+	questionID, err := db.PGUUIDFromString(id)
+	if err != nil {
+		return domain.ErrQuestionNotFound
+	}
+	rowsAffected, err := r.queries.DeleteQuestion(ctx, questionID)
 	if err != nil {
 		return fmt.Errorf("failed to delete question: %w", err)
 	}
-	if result.RowsAffected() == 0 {
+	if rowsAffected == 0 {
 		return domain.ErrQuestionNotFound
 	}
 	return nil
@@ -190,22 +144,21 @@ func (r *QuestionRepository) BulkCreateQuestions(ctx context.Context, questions 
 	}
 	defer tx.Rollback(ctx)
 
-	query := `
-		INSERT INTO questions (text, answer, category, filler_answers)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, created_at, updated_at
-	`
+	queries := r.queries.WithTx(tx)
 
 	for _, question := range questions {
-		err := tx.QueryRow(ctx, query,
-			question.Text,
-			question.Answer,
-			question.Category,
-			question.FillerAnswers,
-		).Scan(&question.ID, &question.CreatedAt, &question.UpdatedAt)
+		row, err := queries.CreateQuestion(ctx, dbgen.CreateQuestionParams{
+			Text:          question.Text,
+			Answer:        question.Answer,
+			Category:      question.Category,
+			FillerAnswers: question.FillerAnswers,
+		})
 		if err != nil {
 			return fmt.Errorf("failed to create question: %w", err)
 		}
+		question.ID = db.StringFromPGUUID(row.ID)
+		question.CreatedAt = db.Time(row.CreatedAt)
+		question.UpdatedAt = db.Time(row.UpdatedAt)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

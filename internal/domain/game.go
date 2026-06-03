@@ -117,6 +117,9 @@ type GameRepository interface {
 	// GetByCode retrieves a game by its code
 	GetByCode(ctx context.Context, code string) (*Game, error)
 
+	// GetByID retrieves a game by its internal ID
+	GetByID(ctx context.Context, id string) (*Game, error)
+
 	// Update updates a game
 	Update(ctx context.Context, game *Game) error
 

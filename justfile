@@ -6,6 +6,7 @@ compose := env_var_or_default('PODMAN_COMPOSE', podman + ' compose')
 compose_file := env_var_or_default('COMPOSE_FILE', 'compose.yml')
 api_image := env_var_or_default('API_IMAGE', 'dahaa-api:dev')
 web_image := env_var_or_default('WEB_IMAGE', 'dahaa-web:dev')
+sqlc_image := env_var_or_default('SQLC_IMAGE', 'docker.io/sqlc/sqlc:1.31.1')
 
 default:
     just --list
@@ -15,6 +16,17 @@ tools:
     go install github.com/pressly/goose/v3/cmd/goose@latest
     go install github.com/air-verse/air@latest
     go install mvdan.cc/gofumpt@latest
+
+# Generate sqlc code using the sqlc container image.
+sqlc-generate:
+    {{podman}} run --rm -v "$PWD:/src:Z" -w /src {{sqlc_image}} generate
+
+# Vet sqlc queries using the sqlc container image.
+sqlc-vet:
+    {{podman}} run --rm -v "$PWD:/src:Z" -w /src {{sqlc_image}} vet
+
+# Generate and vet database query code.
+db-check: sqlc-generate sqlc-vet
 
 # Run the API locally with air. Use `just up-deps` first for Postgres and Redis.
 dev:
@@ -122,6 +134,14 @@ frontend-typecheck:
 
 # Verify frontend typecheck, Biome, and production build.
 frontend-verify: frontend-typecheck frontend-check frontend-build
+
+# Check API health endpoint.
+health:
+    curl -fsS http://localhost:8080/health
+
+# Check API readiness endpoint.
+ready:
+    curl -fsS http://localhost:8080/ready
 
 # Verify backend and frontend locally.
 verify: test frontend-verify

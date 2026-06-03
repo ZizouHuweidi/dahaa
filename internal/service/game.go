@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/zizouhuweidi/dahaa/internal/domain"
-	"github.com/zizouhuweidi/dahaa/internal/repository/postgres"
 	"github.com/zizouhuweidi/dahaa/internal/session"
 	"github.com/zizouhuweidi/dahaa/internal/validation"
 	"github.com/zizouhuweidi/dahaa/internal/websocket"
@@ -33,14 +32,14 @@ var (
 
 // GameService implements the domain.GameService interface
 type GameService struct {
-	gameRepo     *postgres.GameRepository
-	questionRepo *postgres.QuestionRepository
+	gameRepo     domain.GameRepository
+	questionRepo domain.QuestionRepository
 	hub          *websocket.Hub
 	sessionMgr   *session.Manager
 }
 
 // NewGameService creates a new game service
-func NewGameService(gameRepo *postgres.GameRepository, questionRepo *postgres.QuestionRepository, hub *websocket.Hub, sessionMgr *session.Manager) *GameService {
+func NewGameService(gameRepo domain.GameRepository, questionRepo domain.QuestionRepository, hub *websocket.Hub, sessionMgr *session.Manager) *GameService {
 	return &GameService{
 		gameRepo:     gameRepo,
 		questionRepo: questionRepo,

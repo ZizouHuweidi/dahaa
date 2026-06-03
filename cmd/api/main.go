@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/labstack/echo/v5"
+	"github.com/zizouhuweidi/dahaa/internal/config"
+	"github.com/zizouhuweidi/dahaa/internal/database"
 	"github.com/zizouhuweidi/dahaa/internal/handler"
 	"github.com/zizouhuweidi/dahaa/internal/repository/postgres"
 	"github.com/zizouhuweidi/dahaa/internal/service"
@@ -22,9 +23,14 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize database connection
-	pool, err := postgres.NewDB()
+	pool, err := database.ConnectPostgres(cfg.Database)
 	if err != nil {
 		logger.Error("failed to connect to database", "error", err)
 		os.Exit(1)
@@ -32,25 +38,15 @@ func main() {
 	defer pool.Close()
 
 	// Initialize Redis client
-	redisHost := getEnv("REDIS_HOST", "localhost")
-	redisPort := getEnv("REDIS_PORT", "6379")
-	redisPassword := getEnv("REDIS_PASSWORD", "")
-
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     redisHost + ":" + redisPort,
-		Password: redisPassword,
-		DB:       0, // use default DB
-	})
-
-	// Test Redis connection
-	ctx := context.Background()
-	if err := redisClient.Ping(ctx).Err(); err != nil {
+	redisClient, err := database.ConnectRedis(cfg.Redis)
+	if err != nil {
 		logger.Error("failed to connect to redis", "error", err)
 		os.Exit(1)
 	}
+	defer redisClient.Close()
 
 	// Initialize image storage
-	imageStorage, err := storage.NewImageStorage(filepath.Join("uploads", "images"))
+	imageStorage, err := storage.NewImageStorage(cfg.Storage.ImageDir)
 	if err != nil {
 		logger.Error("failed to initialize image storage", "error", err)
 		os.Exit(1)
@@ -74,18 +70,31 @@ func main() {
 	gameService := service.NewGameService(gameRepo, questionRepo, hub, sessionManager)
 
 	apiServer := handler.NewServer(handler.Deps{
-		GameService:  gameService,
-		QuestionRepo: questionRepo,
-		UserService:  userService,
-		ImageStorage: imageStorage,
-		Hub:          hub,
+		GameService:        gameService,
+		QuestionRepo:       questionRepo,
+		UserService:        userService,
+		ImageStorage:       imageStorage,
+		Hub:                hub,
+		CORSAllowedOrigins: cfg.Server.CORSAllowedOrigins,
+		Ready: func(c *echo.Context) error {
+			ctx := c.Request().Context()
+			if err := pool.Ping(ctx); err != nil {
+				return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "database": "unavailable"})
+			}
+			if err := redisClient.Ping(ctx).Err(); err != nil {
+				return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "redis": "unavailable"})
+			}
+			return c.JSON(http.StatusOK, map[string]string{"status": "ready"})
+		},
 	})
 
 	e := apiServer.Echo()
 	server := &http.Server{
-		Addr:              ":8080",
+		Addr:              ":" + cfg.Server.Port,
 		Handler:           e,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
 	}
 
 	// Start server
@@ -95,7 +104,7 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-	logger.Info("server started", "addr", ":8080")
+	logger.Info("server started", "addr", server.Addr)
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
@@ -110,13 +119,4 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("server stopped")
-}
-
-// getEnv gets an environment variable or returns a default value
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
 }
