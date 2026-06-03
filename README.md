@@ -8,7 +8,7 @@ This project uses Podman, `just`, and Goose migrations.
 
 ```sh
 just tools
-just compose-up
+just up-deps
 just migrate-up
 just dev
 ```
@@ -20,6 +20,10 @@ Useful commands:
 ```sh
 just test
 just build
+just up
+just down
+just logs api
+just image-api
 just frontend-dev
 just frontend-build
 just migrate-status

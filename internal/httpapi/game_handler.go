@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/labstack/echo/v5"
 	"github.com/zizouhuweidi/dahaa/internal/domain"
 )
 
@@ -21,136 +22,130 @@ type createGameRequest struct {
 	Settings *domain.GameSettings `json:"settings"`
 }
 
-func (h *GameHandler) CreateGame(w http.ResponseWriter, r *http.Request) {
+func (h *GameHandler) CreateGame(c *echo.Context) error {
 	var req createGameRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
 	}
 	if req.Player.ID == "" || req.Player.Name == "" {
-		writeError(w, http.StatusBadRequest, "player id and name are required")
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "player id and name are required")
 	}
-	game, err := h.gameService.CreateGame(r.Context(), req.Code, req.Player, req.Settings)
+	game, err := h.gameService.CreateGame(c.Request().Context(), req.Code, req.Player, req.Settings)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	writeJSON(w, http.StatusCreated, game)
+	return c.JSON(http.StatusCreated, game)
 }
 
-func (h *GameHandler) GetGame(w http.ResponseWriter, r *http.Request) {
-	game, err := h.gameService.GetGame(r.Context(), r.PathValue("code"))
+func (h *GameHandler) GetGame(c *echo.Context) error {
+	game, err := h.gameService.GetGame(c.Request().Context(), c.Param("code"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "game not found")
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "game not found")
 	}
-	writeJSON(w, http.StatusOK, game)
+	return c.JSON(http.StatusOK, game)
 }
 
-func (h *GameHandler) JoinGame(w http.ResponseWriter, r *http.Request) {
+func (h *GameHandler) JoinGame(c *echo.Context) error {
 	var req struct {
 		Player domain.Player `json:"player"`
 	}
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
 	}
 	if req.Player.ID == "" || req.Player.Name == "" {
-		writeError(w, http.StatusBadRequest, "player id and name are required")
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "player id and name are required")
 	}
-	if err := h.gameService.JoinGame(r.Context(), r.PathValue("code"), req.Player); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if err := h.gameService.JoinGame(c.Request().Context(), c.Param("code"), req.Player); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "successfully joined game"})
+	return c.JSON(http.StatusOK, map[string]string{"message": "successfully joined game"})
 }
 
-func (h *GameHandler) StartGame(w http.ResponseWriter, r *http.Request) {
-	if err := h.gameService.StartGame(r.Context(), r.PathValue("code")); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+func (h *GameHandler) StartGame(c *echo.Context) error {
+	if err := h.gameService.StartGame(c.Request().Context(), c.Param("code")); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *GameHandler) StartTurn(w http.ResponseWriter, r *http.Request) {
+func (h *GameHandler) StartTurn(c *echo.Context) error {
 	var req struct {
 		PlayerID string `json:"player_id"`
 	}
-	if err := readJSON(r, &req); err != nil || req.PlayerID == "" {
-		writeError(w, http.StatusBadRequest, "player_id is required")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
 	}
-	if err := h.gameService.StartTurn(r.Context(), r.PathValue("code"), req.PlayerID); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.PlayerID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "player_id is required")
 	}
-	w.WriteHeader(http.StatusNoContent)
+	if err := h.gameService.StartTurn(c.Request().Context(), c.Param("code"), req.PlayerID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *GameHandler) SelectCategory(w http.ResponseWriter, r *http.Request) {
+func (h *GameHandler) SelectCategory(c *echo.Context) error {
 	var req struct {
 		Category string `json:"category"`
 	}
-	if err := readJSON(r, &req); err != nil || req.Category == "" {
-		writeError(w, http.StatusBadRequest, "category is required")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
 	}
-	if err := h.gameService.SelectCategory(r.Context(), r.PathValue("code"), req.Category); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.Category == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "category is required")
 	}
-	w.WriteHeader(http.StatusNoContent)
+	if err := h.gameService.SelectCategory(c.Request().Context(), c.Param("code"), req.Category); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *GameHandler) SubmitAnswer(w http.ResponseWriter, r *http.Request) {
+func (h *GameHandler) SubmitAnswer(c *echo.Context) error {
 	var req struct {
 		PlayerID string `json:"player_id"`
 		Answer   string `json:"answer"`
 	}
-	if err := readJSON(r, &req); err != nil || req.PlayerID == "" || req.Answer == "" {
-		writeError(w, http.StatusBadRequest, "player_id and answer are required")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
 	}
-	if err := h.gameService.SubmitAnswer(r.Context(), r.PathValue("code"), req.PlayerID, req.Answer); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.PlayerID == "" || req.Answer == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "player_id and answer are required")
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "answer submitted successfully"})
+	if err := h.gameService.SubmitAnswer(c.Request().Context(), c.Param("code"), req.PlayerID, req.Answer); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "answer submitted successfully"})
 }
 
-func (h *GameHandler) SubmitVote(w http.ResponseWriter, r *http.Request) {
+func (h *GameHandler) SubmitVote(c *echo.Context) error {
 	var req struct {
 		PlayerID string `json:"player_id"`
 		AnswerID string `json:"answer_id"`
 	}
-	if err := readJSON(r, &req); err != nil || req.PlayerID == "" || req.AnswerID == "" {
-		writeError(w, http.StatusBadRequest, "player_id and answer_id are required")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
 	}
-	if err := h.gameService.SubmitVote(r.Context(), r.PathValue("code"), req.PlayerID, req.AnswerID); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.PlayerID == "" || req.AnswerID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "player_id and answer_id are required")
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "vote submitted successfully"})
+	if err := h.gameService.SubmitVote(c.Request().Context(), c.Param("code"), req.PlayerID, req.AnswerID); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "vote submitted successfully"})
 }
 
-func (h *GameHandler) EndRound(w http.ResponseWriter, r *http.Request) {
-	if err := h.gameService.EndRound(r.Context(), r.PathValue("code")); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+func (h *GameHandler) EndRound(c *echo.Context) error {
+	if err := h.gameService.EndRound(c.Request().Context(), c.Param("code")); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "round ended successfully"})
+	return c.JSON(http.StatusOK, map[string]string{"message": "round ended successfully"})
 }
 
-func (h *GameHandler) EndGame(w http.ResponseWriter, r *http.Request) {
-	if err := h.gameService.EndGame(r.Context(), r.PathValue("code")); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+func (h *GameHandler) EndGame(c *echo.Context) error {
+	if err := h.gameService.EndGame(c.Request().Context(), c.Param("code")); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return c.NoContent(http.StatusNoContent)
 }
 
 type createQuestionRequest struct {
@@ -160,34 +155,33 @@ type createQuestionRequest struct {
 	FillerAnswers []string `json:"filler_answers"`
 }
 
-func (h *GameHandler) BulkCreateQuestions(w http.ResponseWriter, r *http.Request) {
+func (h *GameHandler) BulkCreateQuestions(c *echo.Context) error {
 	var req struct {
 		Questions []createQuestionRequest `json:"questions"`
 	}
-	if err := readJSON(r, &req); err != nil || len(req.Questions) == 0 {
-		writeError(w, http.StatusBadRequest, "questions are required")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	if len(req.Questions) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "questions are required")
 	}
 	questions := make([]*domain.Question, 0, len(req.Questions))
 	for _, q := range req.Questions {
 		if q.Category == "" || q.Text == "" || q.Answer == "" || len(q.FillerAnswers) < 3 {
-			writeError(w, http.StatusBadRequest, "each question requires category, text, answer, and at least 3 filler answers")
-			return
+			return echo.NewHTTPError(http.StatusBadRequest, "each question requires category, text, answer, and at least 3 filler answers")
 		}
 		questions = append(questions, &domain.Question{Text: q.Text, Answer: q.Answer, Category: q.Category, FillerAnswers: q.FillerAnswers})
 	}
-	if err := h.questionRepo.BulkCreateQuestions(r.Context(), questions); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create questions: "+err.Error())
-		return
+	if err := h.questionRepo.BulkCreateQuestions(c.Request().Context(), questions); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create questions: "+err.Error())
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"message": "questions created successfully", "count": len(questions)})
+	return c.JSON(http.StatusCreated, map[string]any{"message": "questions created successfully", "count": len(questions)})
 }
 
-func (h *GameHandler) GetCategories(w http.ResponseWriter, r *http.Request) {
-	categories, err := h.questionRepo.GetCategories(r.Context())
+func (h *GameHandler) GetCategories(c *echo.Context) error {
+	categories, err := h.questionRepo.GetCategories(c.Request().Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load categories")
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load categories")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"categories": categories})
+	return c.JSON(http.StatusOK, map[string]any{"categories": categories})
 }

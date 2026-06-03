@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/labstack/echo/v5"
 	"github.com/zizouhuweidi/dahaa/internal/domain"
 	"github.com/zizouhuweidi/dahaa/internal/service"
 )
@@ -16,42 +17,38 @@ func NewUserHandler(userService *service.UserService) *UserHandler {
 	return &UserHandler{userService: userService}
 }
 
-func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) Register(c *echo.Context) error {
 	var req service.RegisterRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
 	}
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.DisplayName == "" {
-		writeError(w, http.StatusBadRequest, "username, email, password, and display_name are required")
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "username, email, password, and display_name are required")
 	}
-	user, err := h.userService.Register(r.Context(), req)
+	user, err := h.userService.Register(c.Request().Context(), req)
 	if err != nil {
 		if errors.Is(err, domain.ErrUserAlreadyExists) {
-			writeError(w, http.StatusConflict, "username or email already exists")
-			return
+			return echo.NewHTTPError(http.StatusConflict, "username or email already exists")
 		}
-		writeError(w, http.StatusInternalServerError, "failed to register user")
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to register user")
 	}
-	writeJSON(w, http.StatusCreated, user)
+	return c.JSON(http.StatusCreated, user)
 }
 
-func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) Login(c *echo.Context) error {
 	var req service.LoginRequest
-	if err := readJSON(r, &req); err != nil || req.Username == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, "username and password are required")
-		return
+	if err := c.Bind(&req); err != nil {
+		return err
 	}
-	token, err := h.userService.Login(r.Context(), req)
+	if req.Username == "" || req.Password == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "username and password are required")
+	}
+	token, err := h.userService.Login(c.Request().Context(), req)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidCredentials) {
-			writeError(w, http.StatusUnauthorized, "invalid username or password")
-			return
+			return echo.NewHTTPError(http.StatusUnauthorized, "invalid username or password")
 		}
-		writeError(w, http.StatusInternalServerError, "failed to login")
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to login")
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+	return c.JSON(http.StatusOK, map[string]string{"token": token})
 }

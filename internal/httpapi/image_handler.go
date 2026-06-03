@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/labstack/echo/v5"
 	"github.com/zizouhuweidi/dahaa/internal/storage"
 )
 
@@ -15,41 +16,29 @@ func NewImageHandler(storage *storage.ImageStorage) *ImageHandler {
 	return &ImageHandler{storage: storage}
 }
 
-func (h *ImageHandler) ServeImage(w http.ResponseWriter, r *http.Request) {
-	filename := r.PathValue("filename")
+func (h *ImageHandler) ServeImage(c *echo.Context) error {
+	filename := c.Param("filename")
 	if filename == "" {
-		writeError(w, http.StatusBadRequest, "filename is required")
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "filename is required")
 	}
 	path := h.storage.GetImagePath(filename)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		writeError(w, http.StatusNotFound, "image not found")
-		return
+		return echo.NewHTTPError(http.StatusNotFound, "image not found")
 	}
-	http.ServeFile(w, r, path)
+	return c.File(path)
 }
 
-func (h *ImageHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(6 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form")
-		return
-	}
-	file, _, err := r.FormFile("image")
+func (h *ImageHandler) UploadImage(c *echo.Context) error {
+	fileHeader, err := c.FormFile("image")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "no image file provided")
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "no image file provided")
 	}
-	_ = file.Close()
-
-	fileHeader := r.MultipartForm.File["image"][0]
 	if err := h.storage.ValidateImage(fileHeader); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	filename, err := h.storage.SaveImage(fileHeader)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save image")
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save image")
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"filename": filename})
+	return c.JSON(http.StatusOK, map[string]string{"filename": filename})
 }

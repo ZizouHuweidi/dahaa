@@ -2,29 +2,54 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
+
+	"github.com/labstack/echo/v5"
 )
 
 type errorResponse struct {
 	Error string `json:"error"`
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if value == nil {
-		return
+type strictJSONBinder struct{}
+
+func (strictJSONBinder) Bind(c *echo.Context, dst any) error {
+	r := c.Request()
+	if r.Body == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, errorResponse{Error: message})
-}
-
-func readJSON(r *http.Request, dst any) error {
 	defer r.Body.Close()
+
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	return dec.Decode(dst)
+	if err := dec.Decode(dst); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+	return nil
+}
+
+func httpErrorHandler(c *echo.Context, err error) {
+	status := http.StatusInternalServerError
+	message := "internal server error"
+	var he *echo.HTTPError
+	if errors.As(err, &he) {
+		status = he.StatusCode()
+		if he.Message != "" {
+			message = he.Message
+		} else {
+			message = http.StatusText(status)
+		}
+	} else {
+		slog.Error("request failed", "method", c.Request().Method, "path", c.Request().URL.Path, "error", err)
+	}
+
+	if err := c.JSON(status, errorResponse{Error: message}); err != nil {
+		slog.Error("failed to write error response", "error", err)
+	}
 }
